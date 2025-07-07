@@ -1,22 +1,40 @@
 #include<iostream>
 #include<utils.cuh>
 #include<vector>
+#include<initializer_list>
 
 using namespace std;
 
-int main(void) {
+// For now, use these. I'll make it generic later.
+template<typename T>
+using init_tensor_1D = initializer_list<T>;
 
-    cout << "PINN" << endl;
-    tensor<float> t1({1, 2, 3}), t2({4, 5, 6}), t3({7, 8, 9});
-    tensor<float> vec_add = t1 + t2 + t3;
-    float* x = vec_add.raw();
-    cout << "vec_add: " << "[";
-    for(size_t i = 0; i < vec_add.size(); i++)
-        cout << x[i] << ", ";
+template<typename T>
+using init_tensor_2D = initializer_list<init_tensor_1D<T>>;
+
+template<typename T>
+using init_tensor_3D = initializer_list<init_tensor_2D<T>>;
+
+template<typename T>
+using init_tensor_4D = initializer_list<init_tensor_3D<T>>;
+
+int main(void) {
+    typedef float dtype;
+
+    init_tensor_1D<dtype> b = {1, 2, 3, 4, 5, 6};
+
+    tensor<dtype> t(b);
+    cout << "dimension = " << t.dim() << endl;
+    cout << "size = " << t.size() << endl;
+    cout << "X = [";
+    for(int i = 0; i < t.size(); i++)
+        cout << t.raw()[i] << ", ";
     cout << "\b\b]" << endl;
 
+    auto x = *b.begin();
+
     std::vector<int> v = {1, 2, 3};
-    auto a = v[0];  // <-- hover here
+    auto a = v[0];  
 
     return 0;
 }   
