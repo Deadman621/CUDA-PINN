@@ -1,7 +1,7 @@
 #include<iostream>
-#include<utils.cuh>
 #include<vector>
 #include<initializer_list>
+#include<tensor.cuh>
 
 using namespace std;
 
@@ -22,28 +22,29 @@ template<typename T>
 using init_tensor_4D = initializer_list<init_tensor_3D<T>>;
 
 int main(void) {
-    typedef float dtype;
+    using dtype = float;
 
-    init_tensor_1D<dtype> a = {1, 2, 3, 4};
+    init_tensor_1D<dtype> a = {1};
     init_tensor_2D<dtype> b = {{1, 2}, {3, 4}};
     
-    tensor<dtype> v(a);
-    tensor<dtype> s(b);
-    tensor<dtype> t = 1;
-    
-    /*     cout << "X = [";
-    for(int i = 0; i < t.size(); i++)
-    cout << t.raw()[i] << ", ";
-    cout << "\b\b]" << endl; */
-    
-    
-    v.reshape({1, 4});
-    cout << "dimension = " << v.dim() << endl;
-    cout << "size = " << v.size() << endl;
-    cout << "V = [";
-    for(int i = 0; i < v.get_stride().size(); i++)
-        cout << v.get_stride()[i] << ", ";
+    tensor<dtype> p = tensor<dtype>{as_shape, {2, 2}};
+    p.assign(b);
+
+    //p.reshape({1});
+    cout << "dimension = " << p.dim() << endl;
+    cout << "size = " << p.size() << endl;
+    cout << "p.shape = [";
+    for(int i = 0; i < p.get_shape().size(); i++)
+        cout << p.get_shape()[i] << ", ";
+    cout << "\b\b]" << endl;    
+    cout << "p.stride = [";
+    for(int i = 0; i < p.get_stride().size(); i++)
+        cout << p.get_stride()[i] << ", ";
     cout << "\b\b]" << endl;
+    cout << "p.h_x = [";
+    for(int i = 0; i < p.size(); i++)
+        cout << p.raw()[i] << ", ";
+    cout << "\b\b]" << endl;    
     
     return 0;
 }   

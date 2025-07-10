@@ -1,18 +1,21 @@
 #pragma once
 
-#include <initializer_list>
-#include <iostream>
-#include <cstring>
-#include <vector>
-#include <thread>
-#include <type_traits>
-#include <optional>
-#include <cstdio>
+#include<initializer_list>
+#include<iostream>
+#include<cstring>
+#include<vector>
+#include<thread>
+#include<type_traits>
+#include<optional>
+#include<cstdio>
+#include<sstream>
 
 static const size_t OFFSET_TO_GPU = 10000; 
 
-namespace kernel
-{
+struct as_shape_t {};
+inline constexpr as_shape_t as_shape{};
+
+namespace kernel {
     template <typename T>
     __global__ void add(T **A, T *out, size_t count, size_t N)
     {
@@ -28,6 +31,18 @@ namespace kernel
     }
 }
 
+template<typename T>
+static std::string vec_to_str(const std::vector<T>& v) {
+    std::ostringstream oss;
+
+    oss << "(";
+    for(const auto& i: v)
+        oss << i << ", ";
+    oss << "\b\b)";
+
+    return oss.str();
+}
+
 // type unsafe function.
 template <typename First, typename... Rest>
 static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __ax; }
@@ -41,17 +56,20 @@ class tensor {
         std::vector<size_t> stride;
         size_t n;
 
+        struct with_shape_t {};
+        static constexpr with_shape_t with_shape{};
+
         void typeCheck(void) { static_assert(std::is_arithmetic_v<T>, "Non-arithmetic types not supported"); }
+        bool mem_avail_h(void) { return this->h_x; }
+        bool mem_avail_d(void) { return this->d_x; }
+        bool mem_avail(void) { return this->h_x && this->d_x; }
 
-        size_t calculate_stride(std::initializer_list<size_t> weights)
-        {
-
+        size_t calculate_stride(std::initializer_list<size_t> weights) {
             if (weights.size() != stride.size())
                 throw std::invalid_argument{"calculate_stride: invalid indices provided"};
 
             size_t i = 0, index = 0;
-            for (const auto &w : weights)
-            {
+            for (const auto &w : weights) {
                 index += this->stride[i] * w;
                 i++;
             }
@@ -60,18 +78,15 @@ class tensor {
         }
 
         template <typename U>
-        size_t infer_shape(const std::initializer_list<U> &nums)
-        {
-            if constexpr (std::is_same_v<T, U>)
-            {
+        void infer_shape(const std::initializer_list<U> &nums) {
+            if constexpr (std::is_same_v<T, U>) {
                 this->shape.push_back(nums.size());
-                return 0;
+                return;
             }
 
-            else
-            {
+            else {
                 this->shape.push_back(nums.size());
-                return infer_shape(*nums.begin());
+                infer_shape(*nums.begin());
             }
         }
 
@@ -79,7 +94,6 @@ class tensor {
          * @brief this function assumes shape is already known
          */
 
-        // TODO: Correct Stride calculation logic.
         void initialize_strides(void) {
             const size_t shape_size = this->shape.size();
             if (shape_size == 0) throw std::runtime_error{"initialize_strides: shape is not initialized"};
@@ -90,6 +104,20 @@ class tensor {
                 for(int i = this->stride.size() - 2; i >= 0; i--) 
                     this->stride[i] = this->shape[i + 1] * this->stride[i + 1];
             }
+        }
+
+        template<typename R>
+        void reshape_backend(const R& shape) {
+            size_t product = 1;
+            for(const auto& i: shape)
+                product *= i;
+            
+            if (product != this->n)
+                throw std::invalid_argument{"reshape_backend: cannot reshape, element size doesn't match"};
+
+            this->shape.resize(shape.size());
+            std::copy(shape.begin(), shape.end(), this->shape.begin());
+            this->initialize_strides();
         }
 
         /* REQUIRES:
@@ -145,8 +173,8 @@ class tensor {
         {
             infer_shape(nums);
 
-            this->n = shape.empty() ? 0 : 1;
-            for (auto const &i : shape)
+            this->n = 1;
+            for (auto const &i: shape)
                 n *= i;
             this->stride.resize(this->dim());
             this->h_x = new T[this->n];
@@ -174,27 +202,41 @@ class tensor {
             return true;
         }
 
-        tensor(const size_t &n, const size_t &dim) : n{n} {
-            typeCheck();
-            size_t mem_size = this->n * sizeof(T);
-            this->h_x = new T[this->n];
-            std::memset(this->h_x, 0, mem_size);
+        /**
+         * @brief Initialize tensors with given shape
+         * @param shape std::initializer_list<size_t> or std::vector<size_t> - shape of tensor
+         * @param diff This is for differentiating between overloads
+         */
+        template<typename R>
+        void initialize_tensor(with_shape_t, const R& shape) {
+            this->shape.resize(shape.size());
+            std::copy(shape.begin(), shape.end(), this->shape.begin());
 
-            if (dim > 0) {
-                cudaMalloc(&this->d_x, mem_size);
-                cudaMemset(this->d_x, 0, mem_size);
-
-                this->shape.resize(dim);
-                this->stride.resize(dim);
+            this->n = 1;
+            for (auto const &i: this->shape)
+                n *= i;
+    
+            if (this->n != 0) {
+                size_t mem_size = this->n * sizeof(T);
+                this->h_x = new T[this->n];
+                std::memset(this->h_x, 0, mem_size);
                 
+                size_t dim = this->shape.size();
+                if (dim > 0) {
+                    this->initialize_strides();
+                    cudaMalloc(&this->d_x, mem_size);
+                    cudaMemset(this->d_x, 0, mem_size);
+                }
+
             }
+
         }
+
+        tensor(void) { typeCheck(); }
 
     public:
         template <typename U>
-        tensor(const std::initializer_list<U> &nums)
-        {
-            typeCheck();
+        tensor(const std::initializer_list<U> &nums): tensor() {
             bool isValid = initialize_tensor(nums);
             if (!isValid)
                 throw std::invalid_argument{"tensor: tensor is inconsistent"};
@@ -202,21 +244,19 @@ class tensor {
             size_t bytes_to_allocate = sizeof(T) * this->n;
             cudaMalloc(&this->d_x, bytes_to_allocate);
             cudaMemcpy(this->d_x, this->h_x, bytes_to_allocate, cudaMemcpyHostToDevice);
-            cudaDeviceSynchronize();
         }
 
         // GPU memory will not be used with scalars
-        tensor(const T &scalar) : tensor(1, 0) { *(this->h_x) = scalar; }
-        tensor(const size_t &n, const std::vector<size_t> &shape): tensor(n, 0) { this->shape = shape; }
-        tensor(const size_t &n, const std::initializer_list<size_t> &shape): tensor(n, shape.size())
-        {
-            std::copy(shape.begin(), shape.end(), this->shape.begin());
+        tensor(const T &scalar): tensor{} { 
+            std::initializer_list<size_t> temp = {}; 
+            initialize_tensor(temp, true); 
+            *(this->h_x) = scalar; 
         }
 
-        tensor(const tensor &obj)
-        {
-            typeCheck();
+        tensor(const std::vector<size_t>& shape): tensor{} { initialize_tensor(with_shape, shape); }
+        tensor(as_shape_t, const std::initializer_list<size_t> shape): tensor{} { initialize_tensor(with_shape, shape); }
 
+        tensor(const tensor &obj): tensor{} {
             this->n = obj.n;
             this->h_x = new T[this->n];
             this->shape = obj.shape;
@@ -225,12 +265,12 @@ class tensor {
         }
 
         tensor &operator=(const tensor &obj) {
-            typeCheck();
-
             if (this == &obj)
                 return *this;
 
-            this->~tensor();
+            if (h_x) delete[] h_x;
+            if (d_x) cudaFree(this->d_x);
+            this->h_x = this->d_x = nullptr;
 
             this->n = obj.n;
             this->h_x = new T[n];
@@ -243,8 +283,40 @@ class tensor {
             cudaMalloc(&this->d_x, mem_size);
 
             if (obj.d_x != nullptr) cudaMemcpy(this->d_x, obj.d_x, mem_size, cudaMemcpyDeviceToDevice);
-            else cudaMemcpy(this->d_x, this->h_x, mem_size, cudaMemcpyHostToDevice);
 
+            return *this;
+        }
+
+        template<typename U>
+        tensor& operator=(const std::initializer_list<U> &nums) {
+            if (h_x) delete[] h_x;
+            if (d_x) cudaFree(this->d_x);
+            this->h_x = this->d_x = nullptr;
+            this->n = 0;
+            this->shape.resize(0);
+            this->stride.resize(0);
+
+            bool isValid = initialize_tensor(nums);
+            if (!isValid)
+                throw std::invalid_argument{"tensor: tensor is inconsistent"};
+
+            size_t bytes_to_allocate = sizeof(T) * this->n;
+            cudaMalloc(&this->d_x, bytes_to_allocate);
+            cudaMemcpy(this->d_x, this->h_x, bytes_to_allocate, cudaMemcpyHostToDevice);       
+            return *this;     
+        }
+
+        tensor& operator=(const T& scalar) {
+            if (h_x) delete[] h_x;
+            if (d_x) cudaFree(this->d_x);
+            this->h_x = this->d_x = nullptr;
+            this->n = 0;
+            this->shape.resize(0);
+            this->stride.resize(0);
+            
+            std::initializer_list<size_t> temp = {};
+            initialize_tensor(temp, true);
+            *(this->h_x) = scalar;
             return *this;
         }
 
@@ -261,9 +333,15 @@ class tensor {
         
         // Not worth running GPU
         tensor<T> operator*(const T& scalar) {
+            if (!this->mem_avail_h())
+                throw std::runtime_error{"operator*: cannot do arithmetic with uninitialized tensor"};
+
             tensor<T> result = *this;
             for(size_t i = 0; i < this->n; i++)
                 this->result[i] *= scalar; 
+
+            if (this->mem_avail_d())
+                cudaMemcpy(this->d_x, this->h_x, sizeof(T) * this->n, cudaMemcpyHostToDevice);
 
             return result;
         }
@@ -272,30 +350,27 @@ class tensor {
         inline std::vector<size_t> get_shape(void) const noexcept { return this->shape; }
         inline std::vector<size_t> get_stride(void) const noexcept { return this->stride; }
         inline size_t dim(void) const noexcept { return this->shape.size(); }
-        inline auto reshape(std::vector<size_t>& shape) { 
-            size_t product = 1;
-            for(const auto& i: shape)
-                product *= i;
-            
-            if (product != this->n)
-                throw std::invalid_argument{"reshape: cannot reshape, elements size doesn't match"};
+        inline auto& reshape(std::vector<size_t>& shape) { reshape_backend(shape); return *this; }
+        inline auto& reshape(std::initializer_list<size_t> shape) { reshape_backend(shape); return *this; }
+        
+        template<typename U>
+        auto& assign(std::initializer_list<U> nums) {
+            if (!mem_avail() || !this->shape.size() || !this->stride.size())
+                throw std::runtime_error{"assign: cannot initialize tensor, shape unknown"};
 
-            this->shape = shape; 
-            this->initialize_strides();
+            auto x_alias = this->h_x;
+            if (!validate_shape__initialize_strides__flatten_tensor(nums, x_alias)) 
+                throw std::invalid_argument{"assign: cannot initialize tensor of shape" 
+                    + vec_to_str(this->shape) + " - inconsistent shape"};
+
             return *this;
         }
 
-        inline auto reshape(std::initializer_list<size_t> shape) {
-            size_t product = 1;
-            for(const auto& i: shape)
-                product *= i;
+        auto& assign(const T& scalar) {
+            if (!mem_avail() || this->shape.size())
+                throw std::runtime_error{"assign: cannot initialize tensor, shape unkown or inconsistent"};
             
-            if (product != this->n)
-                throw std::invalid_argument{"reshape: cannot reshape, elements size doesn't match"};
-
-            this->shape.resize(shape.size());
-            std::copy(shape.begin(), shape.end(), this->shape.begin());
-            this->initialize_strides();
+            *(this->h_x) = scalar;
             return *this;
         }
 
@@ -313,6 +388,9 @@ class tensor {
             auto &first = GetFirstTensor(tensors...);
             auto tensor_size = first.size();
             auto tensor_shape = first.get_shape();
+
+            if (!((tensors.mem_avail()) && ...))
+                throw std::invalid_argument{"add: cannot do arithmetic with uninitialized tensor(s)"};
 
             if (!((tensors == first) && ...))
                 throw std::invalid_argument("add: mismatch in tensor shape/size");
