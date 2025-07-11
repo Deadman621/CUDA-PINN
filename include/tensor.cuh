@@ -17,8 +17,7 @@ inline constexpr as_shape_t as_shape{};
 
 namespace kernel {
     template <typename T>
-    __global__ void add(T **A, T *out, size_t count, size_t N)
-    {
+    __global__ void add(T **A, T *out, size_t count, size_t N) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= N)
             return;
@@ -28,6 +27,20 @@ namespace kernel {
             sum += A[j][i];
 
         out[i] = sum;
+    }
+
+    template<typename T>
+    __global__ void matmul(T* A, T* B, T* R, size_t I, size_t J, size_t K) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        int j = blockIdx.y * blockDim.y + threadIdx.y;
+
+        if (i > I && j > J) return;
+
+        T sum = 0.f;
+        for(size_t k = 0; k < K; k++)
+            sum += A[(i * I) + k] * B[k + (j * J)];
+
+        R[(i * J) + j] = sum;
     }
 }
 
@@ -49,6 +62,13 @@ static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __a
 
 template <typename T>
 class tensor {
+
+    template<typename U>
+    friend std::ostream& operator<<(const std::ostream&, const tensor<U>&);4
+
+    template<typename U>
+    void opHelper(const std::ostream&, tensor<U>&, const T*&, size_t = 1)
+
     private:
         T *h_x = nullptr; // host raw pointer
         T *d_x = nullptr; // device raw pointer
@@ -59,10 +79,10 @@ class tensor {
         struct with_shape_t {};
         static constexpr with_shape_t with_shape{};
 
-        void typeCheck(void) { static_assert(std::is_arithmetic_v<T>, "Non-arithmetic types not supported"); }
-        bool mem_avail_h(void) { return this->h_x; }
-        bool mem_avail_d(void) { return this->d_x; }
-        bool mem_avail(void) { return this->h_x && this->d_x; }
+        void typeCheck(void) const noexcept { static_assert(std::is_arithmetic_v<T>, "Non-arithmetic types not supported"); }
+        bool mem_avail_h(void) const noexcept { return this->h_x; }
+        bool mem_avail_d(void) const noexcept { return this->d_x; }
+        bool mem_avail(void) const noexcept { return this->h_x && this->d_x; }
 
         size_t calculate_stride(std::initializer_list<size_t> weights) {
             if (weights.size() != stride.size())
@@ -330,7 +350,8 @@ class tensor {
          */
         bool operator==(const tensor &obj) const noexcept { return this->shape == obj.shape && this->n == obj.n; }
         tensor<T> operator+(tensor<T> &obj) { return tensor<T>::add(*this, obj); }
-        
+        tensor<T> operator*(tensor<T> &obj) { return tensor<T>::matmul(*this, obj); }
+
         // Not worth running GPU
         tensor<T> operator*(const T& scalar) {
             if (!this->mem_avail_h())
@@ -360,7 +381,7 @@ class tensor {
 
             auto x_alias = this->h_x;
             if (!validate_shape__initialize_strides__flatten_tensor(nums, x_alias)) 
-                throw std::invalid_argument{"assign: cannot initialize tensor of shape" 
+                throw std::invalid_argument{"assign: cannot initialize tensor of shape " 
                     + vec_to_str(this->shape) + " - inconsistent shape"};
 
             return *this;
@@ -395,40 +416,56 @@ class tensor {
             if (!((tensors == first) && ...))
                 throw std::invalid_argument("add: mismatch in tensor shape/size");
 
-            tensor<T> result(tensor_size, tensor_shape);
+            tensor<T> result(tensor_shape);
             
             if (tensor_shape.size() > 0) {
                 
                 std::vector<T*> d_ptrs = {tensors.d_x...};
                 // device variables
-                T **d_ptr_2D, *d_outptr;
+                T **d_ptr_2D;
                 size_t mem_size = sizeof(T*) * sizeof(d_ptrs);
 
-                cudaMalloc(&d_outptr, sizeof(T) * tensor_size);
                 cudaMalloc(&d_ptr_2D, mem_size);
                 cudaMemcpy(d_ptr_2D, d_ptrs.data(), mem_size, cudaMemcpyHostToDevice);
                 
                 int threadsperblock(256);
                 int blocks = (tensor_size + threadsperblock - 1) / threadsperblock;
                 
-                kernel::add<T><<<blocks, threadsperblock>>>(d_ptr_2D, d_outptr, count, tensor_size);
-                cudaDeviceSynchronize();
+                kernel::add<T><<<blocks, threadsperblock>>>(d_ptr_2D, result.d_x, count, tensor_size);
                 cudaError_t err = cudaGetLastError();
-                if (err != cudaSuccess) {
+                if (err != cudaSuccess) 
                     printf("Kernel launch failed: %s\n", cudaGetErrorString(err));
-                }
+                cudaFree(d_ptr_2D);
                 
                 mem_size = sizeof(T) * tensor_size;
-                cudaMemcpy(result.h_x, d_outptr, mem_size, cudaMemcpyDeviceToHost);
-                cudaMemcpy(result.d_x, d_outptr, mem_size, cudaMemcpyDeviceToDevice);
-
-                cudaFree(d_ptr_2D);
-                cudaFree(d_outptr);
+                cudaMemcpy(result.h_x, result.d_x, mem_size, cudaMemcpyDeviceToHost);
             }
 
             else *result.h_x = (*tensors.h_x + ...);
 
             return result;
+        }
+
+        static tensor<T> matmul(const tensor<T>& a, const tensor<T>& b) {
+            if (!a.mem_avail() || !b.mem_avail()) throw std::invalid_argument{"matmul: cannot multiply uninitialized tensors"};
+            if (a.dim() != 2 || b.dim() != 2) throw std::invalid_argument{"matmul: given tensor(s) are not matrices"};
+            if (a.shape[1] != b.shape[0]) throw std::invalid_argument{"matmul: invalid shapes"};
+            
+            size_t i = a.shape[0], j = b.shape[1], k = a.shape[1]; 
+            tensor<T> result(as_shape, {i, j});
+
+            dim3 block(256, 256);
+            dim3 grid_size((i + block.x - 1) / block.x, (j + block.y - 1) / block.y);
+            kernel::matmul(a.d_x, b.d_x, result.d_x, i, j, k);
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) 
+                printf("Kernel launch failed: %s\n", cudaGetErrorString(err));
+            
+            return result;
+        }
+
+        static tensor<T> einsum(const tensor<T>& a, const tensor<T>& b) {
+            // Will do later...
         }
 
         ~tensor(void) {
