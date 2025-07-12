@@ -1,9 +1,9 @@
 #include<tensor.cuh>
-
+#include<ostream>
 
 // TODO
 template<typename T>
-void opHelper(const std::ostream& output, tensor<T>& obj, const T*& raw_ptr, size_t dim) {
+void opHelper(std::ostream& output, tensor<T>& obj, const T*& raw_ptr, size_t dim) {
     if (dim > obj.dim()) {
 
         return;
@@ -17,7 +17,7 @@ void opHelper(const std::ostream& output, tensor<T>& obj, const T*& raw_ptr, siz
 }
 
 template<typename T>
-std::ostream& operator<<(const std::ostream& output, tensor<T>& obj) {
+std::ostream& operator<<(std::ostream& output, tensor<T>& obj) {
     if (obj.dim() == 0) {
         output << *obj.h_x;
         return output;

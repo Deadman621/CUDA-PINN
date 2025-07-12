@@ -30,7 +30,7 @@ int main(void) {
     tensor<dtype> x = a;
     tensor<dtype> y = b;
     
-    tensor<dtype> p = x + y;
+    tensor<dtype> p = x * y;
 
     //p.reshape({1});
     cout << "dimension = " << p.dim() << endl;
