@@ -51,6 +51,14 @@ namespace kernel {
 
         *R += *A * *B; 
     }
+
+    template<typename T>
+    __global__ void scalar_dist(T* t, T s, size_t N) {
+        int i = blockIdx.x + blockDim.x + threadIdx.x;
+        if (i >= N) return;
+
+        t[i] *= s;
+    }
 }
 
 template<typename T>
@@ -99,6 +107,8 @@ class tensor {
 
             size_t i = 0, index = 0;
             for (const auto &w : weights) {
+                if (w > this->shape[i] || static_cast<ptrdiff_t>(w) < 0)
+                    throw std::out_of_range{"calculate_stride: out of bounds access"};
                 index += this->stride[i] * w;
                 i++;
             }
@@ -230,8 +240,8 @@ class tensor {
 
         /**
          * @brief Initialize tensors with given shape
+         * @param with_shape_t pass as_shape here to distinguish from other overloads
          * @param shape std::initializer_list<size_t> or std::vector<size_t> - shape of tensor
-         * @param diff This is for differentiating between overloads
          */
         template<typename R>
         void initialize_tensor(with_shape_t, const R& shape) {
@@ -375,18 +385,38 @@ class tensor {
             } 
         }
 
-        // Not worth running GPU - atleast for now
         tensor<T> operator*(const T& scalar) {
             if (!this->mem_avail())
                 throw std::runtime_error{"operator*: cannot do arithmetic with uninitialized tensor"};
 
-            tensor<T> result = *this;
-            for(size_t i = 0; i < this->n; i++)
-                result.h_x[i] *= scalar; 
+            tensor<T> result(as_shape, this->shape);
 
-            cudaMemcpy(this->d_x, this->h_x, sizeof(T) * this->n, cudaMemcpyHostToDevice);
+            if (result.n > OFFSET_TO_GPU) {
+                dim3 blockSize(256);
+                dim3 gridSize((result.n * blockSize.x - 1) / blockSize.x);
+                kernel::scalar_dist<<<gridSize, blockSize>>>(result.h_x, scalar, result.n);
+                cudaMemcpy(result.h_x, result.d_x, result.n, cudaMemcpyDeviceToHost);
+            }
+
+            else {
+                for(size_t i = 0; i < result.n; i++)
+                    result.h_x[i] *= scalar;
+                cudaMemcpy(result.d_x, result.h_x, result.n, cudaMemcpyHostToDevice);
+            }
 
             return result;
+        }
+
+        template<typename... Indices>
+        T& operator()(Indices... indices) {
+            constexpr size_t count = sizeof...(indices);
+            static_assert((std::is_integral_v<Indices> && ...), "operator(): all arguments must be unsigned numbers");
+            if (count != this->dim()) throw std::out_of_range{"operator(): invalid access"};
+            
+            std::initializer_list<size_t> I = { static_cast<size_t>(indices)... };
+            size_t linear_index = this->calculate_stride(I);
+
+            return this->h_x[linear_index];
         }
 
         inline size_t size(void) const noexcept { return this->n; }

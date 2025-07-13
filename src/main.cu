@@ -50,5 +50,7 @@ int main(void) {
     cout << "\b\b]" << endl;
     cout << "p.h_x = " << p << endl;
 
+    cout << "p[5][1] = " << p(1000, 1) << endl;
+
     return 0;
 }   
