@@ -34,11 +34,11 @@ namespace kernel {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
 
-        if (i > I && j > J) return;
-
+        if (i >= I || j >= J) return;
+                                                                  
         T sum = 0.f;
         for(size_t k = 0; k < K; k++)
-            sum += A[(i * I) + k] * B[k + (j * J)];
+            sum += A[(i * K) + k] * B[(k * J) + j];
 
         R[(i * J) + j] = sum;
     }
@@ -73,10 +73,10 @@ template <typename T>
 class tensor {
 
     template<typename U>
-    friend std::ostream& operator<<(const std::ostream&, const tensor<U>&);
+    friend std::ostream& operator<<(std::ostream&, const tensor<U>&);
 
     template<typename U>
-    void opHelper(const std::ostream&, tensor<U>&, const T*&, size_t = 1);
+    friend void opHelper(std::ostream&, const tensor<U>&, size_t, size_t);
 
     private:
         T *h_x = nullptr; // host raw pointer
@@ -248,7 +248,7 @@ class tensor {
                 std::memset(this->h_x, 0, mem_size);
                 size_t dim = this->shape.size();
 
-                if (dim > 0)  this->initialize_strides();
+                if (dim > 0) this->initialize_strides();
                 cudaMalloc(&this->d_x, mem_size);
                 cudaMemset(this->d_x, 0, mem_size);
             }
@@ -463,7 +463,6 @@ class tensor {
             return result;
         }
 
-        // FIX THISS
         static tensor<T> matmul(const tensor<T>& a, const tensor<T>& b) {
             if (!a.mem_avail() || !b.mem_avail()) throw std::invalid_argument{"matmul: cannot multiply uninitialized tensors"};
             if (a.dim() != 2 || b.dim() != 2) throw std::invalid_argument{"matmul: given tensor(s) are not matrices"};
@@ -472,9 +471,10 @@ class tensor {
             size_t i = a.shape[0], j = b.shape[1], k = a.shape[1]; 
             tensor<T> result(as_shape, {i, j});
             
-            dim3 block(256, 256);
+            dim3 block(16, 16);
             dim3 grid_size((i + block.x - 1) / block.x, (j + block.y - 1) / block.y);
-            kernel::matmul<<<block, grid_size>>>(a.d_x, b.d_x, result.d_x, i, j, k);
+            kernel::matmul<<<grid_size, block>>>(a.d_x, b.d_x, result.d_x, i, j, k);
+            cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) 
                 printf("matmul - kernel launch failed: %s\n", cudaGetErrorString(err));
@@ -514,3 +514,44 @@ class tensor {
             this->stride.resize(0);
         }
 };
+
+template<typename T>
+void opHelper(std::ostream& output, const tensor<T>& obj, size_t index, size_t dim = 1) {
+    
+    size_t start = index * obj.shape[dim - 1];
+    size_t end = start + obj.shape[dim - 1];
+    
+    if (dim == obj.dim()) {
+        output << '[';
+        for(size_t i = start; i < end; i++) {
+            output << obj.h_x[i];
+            if (i != end - 1) 
+                output << ", ";
+        }
+        output << ']';
+
+        return;
+    }
+    
+    output << '[';
+    for(size_t i = start; i < end; i++) {
+        opHelper(output, obj, i, dim + 1);
+        if (i != end - 1) 
+            output << ", ";
+    }
+    output << ']';
+
+    return;
+}
+
+template<typename T>
+std::ostream& operator<<(std::ostream& output, const tensor<T>& obj) {
+    if (obj.dim() == 0) {
+        output << *obj.h_x;
+        return output;
+    }
+
+    opHelper(output, obj, 0);
+
+    return output;
+}
