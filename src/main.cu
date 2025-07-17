@@ -24,18 +24,25 @@ using init_tensor_4D = initializer_list<init_tensor_3D<T>>;
 int main(void) {
     using dtype = float;
 
-    init_tensor_2D<dtype> a = {{1, 2}, 
-                               {3, 4}, 
-                               {1, 2}, 
-                               {3, 4}};
+    init_tensor_3D<dtype> a = {
+        {   
+            { 0, 1, 2, 3 },
+            { 4, 5, 6, 7 },
+            { 8, 9, 10, 11 }
+        },
+        {   
+            { 12, 13, 14, 15 },
+            { 16, 17, 18, 19 },
+            { 20, 21, 22, 23 }
+        }
+    };
                                
     init_tensor_2D<dtype> b = {{1, 2}, 
                                {3, 4}};
 
     tensor<dtype> x = a;
     tensor<dtype> y = b;
-    
-    tensor<dtype> p = a;
+    tensor<dtype> p = tensor<dtype>::transpose(x);
 
     //p.reshape({1});
     cout << "dimension = " << p.dim() << endl;
@@ -49,8 +56,6 @@ int main(void) {
         cout << p.get_stride()[i] << ", ";
     cout << "\b\b]" << endl;
     cout << "p.h_x = " << p << endl;
-
-    cout << "p[5][1] = " << p(1000, 1) << endl;
 
     return 0;
 }   

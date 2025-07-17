@@ -9,6 +9,7 @@
 #include<optional>
 #include<cstdio>
 #include<sstream>
+#include<unordered_set>
 
 static const size_t OFFSET_TO_GPU = 10000; 
 
@@ -66,9 +67,12 @@ static std::string vec_to_str(const std::vector<T>& v) {
     std::ostringstream oss;
 
     oss << "(";
-    for(const auto& i: v)
-        oss << i << ", ";
-    oss << "\b\b)";
+    for(const auto& i: v) {
+        oss << i;
+        if (i != v.back())
+            oss << ", ";
+    }
+    oss << ")";
 
     return oss.str();
 }
@@ -535,6 +539,89 @@ class tensor {
             // Will do later...
         }
 
+        /**
+         * @brief returns a transposed tensor
+         */
+        static tensor<T> transpose(const tensor<T>& a, const std::initializer_list<size_t> order = {}) {
+            
+            tensor<T> result = a;
+            size_t size = order.size();
+            std::vector<size_t>& shape = result.shape;
+            std::vector<size_t>& stride = result.stride;
+
+            if (size == 0) {
+                size_t start = 0, end = shape.size() - 1;
+                while(start < end) {
+                    std::swap(shape[start], shape[end]);
+                    std::swap(stride[start], stride[end]);
+                    start++, end--;
+                }
+            }
+
+            else {
+                if (size != a.shape.size()) 
+                    throw std::invalid_argument{"transpose: axis order must match dimensions"};
+
+                std::unordered_set<size_t> set;
+
+                size_t k = 0;
+                for(const auto& i: order) {
+                    if (i >= a.dim()) throw std::invalid_argument{"transpose: invalid order"};
+                    if (!set.insert(i).second) throw std::invalid_argument{"transpose: duplicates not allowed"};
+                    
+                    shape[k] = a.shape[i];
+                    stride[k] = a.stride[i];
+
+                    k++;
+                }
+            }
+
+            return result;
+        }
+        
+        /**
+         * @brief transposes the tensor inplace
+         */
+        tensor<T>& transpose(const std::initializer_list<size_t> order = {}) {
+
+            size_t size = order.size();
+            
+            if (size == 0) {
+                size_t start = 0, end = this->shape.size() - 1;
+                while(start < end) {
+                    std::swap(this->shape[start], this->shape[end]);
+                    std::swap(this->stride[start], this->stride[end]);
+                    start++, end--;
+                }
+            }
+            
+            else {
+                std::vector<size_t> new_shape; new_shape.resize(this->shape.size());
+                std::vector<size_t> new_stride; new_stride.resize(this->stride.size());
+
+                if (size != this->shape.size()) 
+                    throw std::invalid_argument{"transpose: axis order must match dimensions"};
+
+                std::unordered_set<size_t> set;
+
+                size_t k = 0;
+                for(const auto& i: order) {
+                    if (i >= this->dim()) throw std::invalid_argument{"transpose: invalid order"};
+                    if (!set.insert(i).second) throw std::invalid_argument{"transpose: duplicates not allowed"};
+                    
+                    new_shape[k] = this->shape[i];
+                    new_stride[k] = this->stride[i];
+
+                    k++;
+                }
+
+                this->shape = new_shape;
+                this->stride = new_stride;
+            }           
+
+            return *this;
+        }
+
         ~tensor(void) {
             if (h_x) delete[] h_x;
             if (d_x) cudaFree(this->d_x);
@@ -548,28 +635,29 @@ class tensor {
 template<typename T>
 void opHelper(std::ostream& output, const tensor<T>& obj, size_t index, size_t dim = 1) {
     
-    size_t start = index * obj.shape[dim - 1];
-    size_t end = start + obj.shape[dim - 1];
+    size_t offset = obj.stride[dim - 1];
+    size_t start = index;
+    size_t end = start + obj.shape[dim - 1] * offset;
     
     if (dim == obj.dim()) {
-        output << '[';
-        for(size_t i = start; i < end; i++) {
-            output << obj.h_x[i];
-            if (i != end - 1) 
-                output << ", ";
+        output << '[' << std::flush;
+        for(size_t i = start; i < end; i += offset) {
+            output << obj.h_x[i] << std::flush;
+            if (i != end - offset) 
+                output << ", " << std::flush;
         }
-        output << ']';
+        output << ']' << std::flush;
 
         return;
     }
     
-    output << '[';
-    for(size_t i = start; i < end; i++) {
+    output << '[' << std::flush;
+    for(size_t i = start; i < end; i += offset) {
         opHelper(output, obj, i, dim + 1);
-        if (i != end - 1) 
-            output << ", ";
+        if (i != end - offset) 
+            output << ", " << std::flush;
     }
-    output << ']';
+    output << ']' << std::flush;
 
     return;
 }
