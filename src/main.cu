@@ -22,40 +22,17 @@ template<typename T>
 using init_tensor_4D = initializer_list<init_tensor_3D<T>>;
 
 int main(void) {
-    using dtype = float;
+    using dtype = double;
 
-    init_tensor_3D<dtype> a = {
-        {   
-            { 0, 1, 2, 3 },
-            { 4, 5, 6, 7 },
-            { 8, 9, 10, 11 }
-        },
-        {   
-            { 12, 13, 14, 15 },
-            { 16, 17, 18, 19 },
-            { 20, 21, 22, 23 }
-        }
-    };
-                               
-    init_tensor_2D<dtype> b = {{1, 2}, 
-                               {3, 4}};
+    init_tensor_2D<dtype> d_inputs =  {{1.0, 2.0, 3.0, 2.5}, {2.0, 5.0, -1.0, 2.0}, {-1.5, 2.7, 3.3, -0.8}};
+    init_tensor_2D<dtype> d_weights = {{0.2, 0.8, -0.5, 1.0}, {0.5, -0.91, 0.26, -0.5}, {-0.26, -0.27, 0.17, 0.87}};
+    init_tensor_2D<dtype> d_biases = {{2.0, 2.0, 2.0}, {3.0, 3.0, 3.0}, {0.5, 0.5, 0.5}};
 
-    tensor<dtype> x = a;
-    tensor<dtype> y = b;
-    tensor<dtype> p = tensor<dtype>::transpose(x);
+    tensor<dtype> inputs(d_inputs), weights(d_weights), biases(d_biases);
 
-    //p.reshape({1});
-    cout << "dimension = " << p.dim() << endl;
-    cout << "size = " << p.size() << endl;
-    cout << "p.shape = [";
-    for(int i = 0; i < p.get_shape().size(); i++)
-        cout << p.get_shape()[i] << ", ";
-    cout << "\b\b]" << endl;    
-    cout << "p.stride = [";
-    for(int i = 0; i < p.get_stride().size(); i++)
-        cout << p.get_stride()[i] << ", ";
-    cout << "\b\b]" << endl;
-    cout << "p.h_x = " << p << endl;
+    auto layer_outputs = inputs * tensor<dtype>::transpose(weights) /* + biases */;
+
+    cout << endl << layer_outputs << endl;
 
     return 0;
-}   
+} 
