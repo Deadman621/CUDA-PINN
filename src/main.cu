@@ -24,15 +24,13 @@ using init_tensor_4D = initializer_list<init_tensor_3D<T>>;
 int main(void) {
     using dtype = double;
 
-    init_tensor_2D<dtype> d_inputs =  {{1.0, 2.0, 3.0, 2.5}, {2.0, 5.0, -1.0, 2.0}, {-1.5, 2.7, 3.3, -0.8}};
-    init_tensor_2D<dtype> d_weights = {{0.2, 0.8, -0.5, 1.0}, {0.5, -0.91, 0.26, -0.5}, {-0.26, -0.27, 0.17, 0.87}};
-    init_tensor_2D<dtype> d_biases = {{2.0, 2.0, 2.0}, {3.0, 3.0, 3.0}, {0.5, 0.5, 0.5}};
+    init_tensor_1D<dtype> a = {1, 2, 3, 4};
+    init_tensor_1D<dtype> b = {1, 2, 3, 4};
+    tensor<dtype> x(a), y(b);
 
-    tensor<dtype> inputs(d_inputs), weights(d_weights), biases(d_biases);
+    tensor<dtype> z = x + y;
 
-    auto layer_outputs = inputs * tensor<dtype>::transpose(weights) /* + biases */;
-
-    cout << endl << layer_outputs << endl;
+    cout << endl << "Z = " << z << endl;
 
     return 0;
 } 
