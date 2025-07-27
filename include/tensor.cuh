@@ -167,7 +167,7 @@ class tensor {
         bool initialize_tensor(const std::initializer_list<U> &nums) {
             infer_shape(nums);
 
-            this->n = this->shape.size() > 0? 1: 0;
+            this->n = 1;
             for (auto const &i: shape)
                 n *= i;
             this->stride.resize(this->dim());
@@ -209,7 +209,7 @@ class tensor {
             this->shape.resize(shape.size());
             std::copy(shape.begin(), shape.end(), this->shape.begin());
 
-            this->n = this->shape.size() > 0? 1: 0;
+            this->n = 1;
             for (auto const &i: this->shape)
                 n *= i;
     
@@ -222,7 +222,7 @@ class tensor {
                 if (dim > 0) this->initialize_strides();
             }
 
-            device.allocate(n, dim());
+            device.allocate(n, this->dim());
             device.copy(this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
         }
 
@@ -236,7 +236,7 @@ class tensor {
                 throw std::invalid_argument{"tensor: tensor is inconsistent"};
 
             device.allocate(this->n, this->dim());
-            device.copy(this->x, this->shape, this->stride, cudaMemcpyHostToDevice);
+            device.copy(this->x, this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
         }
 
         // GPU memory will not be used with scalars
@@ -261,7 +261,7 @@ class tensor {
             }
 
             device.allocate(this->n, this->dim());
-            device.copy(this->x, this->shape, this->stride, cudaMemcpyHostToDevice);
+            device.copy(this->x, this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
         }
 
         tensor &operator=(const tensor &obj) {
@@ -342,19 +342,19 @@ class tensor {
             if (!this->mem_avail())
                 throw std::runtime_error{"operator*: cannot do arithmetic with uninitialized tensor"};
 
-            tensor<T> result(this->shape);
+            tensor<T> result = *this;
 
             if (result.n > OFFSET_TO_GPU) {
                 dim3 blockSize(256);
                 dim3 gridSize((result.n * blockSize.x - 1) / blockSize.x);
-                kernel::scalar_dist<<<gridSize, blockSize>>>(result.x, scalar, result.n);
-                cudaMemcpy(result.x, result.d_x, result.n, cudaMemcpyDeviceToHost);
+                kernel::scalar_dist<<<gridSize, blockSize>>>(result.device.data(), scalar, result.n);
+                result.device.copy(result.x, cudaMemcpyDeviceToHost);
             }
 
             else {
                 for(size_t i = 0; i < result.n; i++)
                     result.x[i] *= scalar;
-                cudaMemcpy(result.d_x, result.x, result.n, cudaMemcpyHostToDevice);
+                result.device.copy(result.x, cudaMemcpyHostToDevice);
             }
 
             return result;
@@ -423,27 +423,24 @@ class tensor {
 
             tensor<T> result(tensor_shape);
                 
-            std::vector<const kernel::d_variables<T>> devices = {tensors.device.data()...};
+            std::vector<kernel::d_variables<T>> devices = {tensors.device.data()...};
 
             kernel::d_variables<T> *d_ptr;
-            size_t mem_size = sizeof(kernel::d_variables<T>) * sizeof(devices);
+            size_t mem_size = sizeof(kernel::d_variables<T>) * devices.size();
 
             cudaMalloc(&d_ptr, mem_size);
             cudaMemcpy(d_ptr, devices.data(), mem_size, cudaMemcpyHostToDevice);
             
-            int threadsperblock(256);
-            int blocks = (tensor_size + threadsperblock - 1) / threadsperblock;
+            int block_size(256);
+            int grid_size = (tensor_size + block_size - 1) / block_size;
             
-            kernel::add<T><<<blocks, threadsperblock>>>(d_ptr, result.device.x, count, tensor_size);
+            kernel::add<T><<<grid_size, block_size>>>(d_ptr, result.device, count, tensor_size);
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) 
                 printf("add - kernel launch failed: %s\n", cudaGetErrorString(err));
             cudaFree(d_ptr);
             
-            mem_size = sizeof(T) * tensor_size;
-
-            // FIX THIS
-            cudaMemcpy(result.x, result.device.x, mem_size, cudaMemcpyDeviceToHost);
+            result.device.copy(result.x, cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -458,13 +455,13 @@ class tensor {
             
             dim3 block(16, 16);
             dim3 grid_size((i + block.x - 1) / block.x, (j + block.y - 1) / block.y);
-            kernel::matmul<<<grid_size, block>>>(a.d_x, b.d_x, result.d_x, i, j, k);
+            kernel::matmul<<<grid_size, block>>>(a.device.data(), b.device.data(), result.device.data(), i, j, k);
             cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) 
                 printf("matmul - kernel launch failed: %s\n", cudaGetErrorString(err));
             
-            cudaMemcpy(result.x, result.d_x, sizeof(T) * result.n, cudaMemcpyDeviceToHost);  
+            result.device.copy(result.x, cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -473,15 +470,18 @@ class tensor {
             if (!a.mem_avail() || !b.mem_avail()) throw std::invalid_argument{"dot: cannot multiply uninitialized tensors"};
             if (a.dim() != 1 || b.dim() != 1) throw std::invalid_argument{"dot: given tensor(s) are not vectors"};
             if (a.n != b.n) throw std::invalid_argument{"dot: cannot perform dot operation with unmatched sizes"};
-
-            size_t N = a.n;
+            
             tensor<T> result(0);
+            size_t N = a.n;
             dim3 block(256);
             dim3 grid_size((N + block.x - 1) / block.x);
-            kernel::dot<<<block, grid_size>>>(a.d_x, b.d_x, result.d_x, N);
+            kernel::dot<<<grid_size, block>>>(a.device.data(), b.device.data(), result.device.data(), N);
+            cudaDeviceSynchronize();
             cudaError_t err = cudaGetLastError();
             if (err != cudaSuccess) 
-                printf("dot - kernel launch failed: %s\n", cudaGetErrorString(err));            
+            printf("dot - kernel launch failed: %s\n", cudaGetErrorString(err)); 
+            
+            result.device.copy(result.x, cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -499,6 +499,7 @@ class tensor {
             size_t size = order.size();
             std::vector<size_t>& shape = result.shape;
             std::vector<size_t>& stride = result.stride;
+            kernel::device<T>& device = result.device;
 
             if (size == 0) {
                 size_t start = 0, end = shape.size() - 1;
@@ -526,6 +527,9 @@ class tensor {
                     k++;
                 }
             }
+
+            if (a.dim() > 1) device.transposed = true;
+            device.copy(shape.data(), stride.data(), cudaMemcpyHostToDevice);
 
             return result;
         }
@@ -568,14 +572,11 @@ class tensor {
 
                 this->shape = new_shape;
                 this->stride = new_stride;
-
-                if (this->d_stride) cudaFree(this->d_stride);
-                if (this->dim() > 0) {
-                    cudaMalloc(&this->d_stride, this->dim());
-                    cudaMemcpy(this->d_stride, this->stride.data(), this->stride.size() * sizeof(size_t), cudaMemcpyHostToDevice);
-                }
             }           
 
+            if (this->dim() > 1) device.transposed = true;
+            this->device.copy(this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
+            
             return *this;
         }
 

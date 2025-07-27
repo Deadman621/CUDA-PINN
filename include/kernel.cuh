@@ -9,26 +9,45 @@ namespace kernel {
         size_t* stride = nullptr;
         size_t dim = 0;
         size_t n;
+        bool transposed = false;
 
         __device__ T& operator[](size_t index) {
-            size_t real_index = 0;
-            for(size_t i = 0; i < this->n; i++) {
-                real_index += (index % this->shape[i]) * this->stride[i];
-                index /= this->shape[i];
-            }  
+            if (transposed) {
+                size_t real_index = 0;
+                for(int i = this->dim - 1; i >= 0; i--) {
+                    real_index += ((index % this->shape[i]) * this->stride[i]);
+                    index /= this->shape[i];
+                }  
 
-            return x[real_index];
+                return x[real_index];                
+            }
+
+            return x[index];
         }
 
         __device__ const T& operator[](size_t index) const {
-            size_t real_index = 0;
-            for(size_t i = 0; i < this->n; i++) {
-                real_index += (index % this->shape[i]) * this->stride[i];
-                index /= this->shape[i];
-            }  
+            if (transposed) {
+                size_t real_index = 0;
+                for(int i = this->dim - 1; i >= 0; i--) {
+                    real_index += ((index % this->shape[i]) * this->stride[i]);
+                    index /= this->shape[i];
+                }  
 
-            return x[real_index];
+                return x[real_index];                
+            }
+
+            return x[index];
         }
+
+        __device__ T& operator*() { return *this->x; }
+        __device__ const T& operator*() const { return *this->x; }
+
+        __device__ size_t calculate_stride(size_t* weights) {
+            size_t index = 0;
+            for(size_t i = 0; i < this->n; i++)
+                index += weights[i] * this->stride[i];
+            return index;
+        } 
     };
 
     template<typename T>
@@ -112,38 +131,81 @@ namespace kernel {
                 return this->resize(n).reshape(dim);
             }
             
-            device& copy(const size_t* const x, cudaMemcpyKind kind) {
-                if (!x)
-                    throw std::invalid_argument{"tensor::device::copy: passing nullptr not allowed"};
-
-                if (!x_allocated)
-                    throw std::invalid_argument{"tensor::device::copy: copying to unallocated raw data (x)"};
-            
-                size_t mem_size_x = this->n * sizeof(T); 
+            device& copy(T* const x, cudaMemcpyKind kind) {
+                if (this->n > 0) {
+                    if (!x) throw std::invalid_argument{"tensor::device::copy: passing nullptr not allowed"};
+                    if (!x_allocated) throw std::invalid_argument{"tensor::device::copy: copying to unallocated raw data (x)"};
                 
-                if (this->n > 0) cudaMemcpy(this->x, x, mem_size_x, kind);
+                    size_t mem_size_x = this->n * sizeof(T); 
+                    T *src, *dst;
+
+                    switch(kind) {
+                        case cudaMemcpyHostToDevice:                          
+                        case cudaMemcpyDeviceToDevice:
+                            src = x;
+                            dst = this->x;
+                            break;
+                            
+                        case cudaMemcpyDeviceToHost:
+                            src = this->x;
+                            dst = x;
+                            break;
+
+                        default:
+                            throw std::invalid_argument{"tensor::device::copy: invalid cudaMemcpyKind"};
+                            break;                        
+                    }
+                    
+                    cudaMemcpy(dst, src, mem_size_x, kind);
+                }
 
                 return *this;
-            }
+            } 
 
-            device& copy(const size_t* const shape, const size_t* const stride, cudaMemcpyKind kind) {
-                if (!(shape || stride))
-                    throw std::invalid_argument{"tensor::device::copy: passing nullptrs not allowed"};
-
-                if (!shape_allocated)
-                    throw std::invalid_argument{"tensor::device::copy: copying to unallocated shape and stride"};
-
-                size_t mem_size_s = this->dim * sizeof(size_t);
-                
+            device& copy(size_t* const shape, size_t* const stride, cudaMemcpyKind kind) {                
                 if (this->dim > 0) {
-                    cudaMemcpy(this->shape, shape, mem_size_s, kind);
-                    cudaMemcpy(this->stride, stride, mem_size_s, kind);
+                    if (!(shape || stride))
+                        throw std::invalid_argument{"tensor::device::copy: passing nullptrs not allowed"};
+
+                    if (!shape_allocated)
+                        throw std::invalid_argument{"tensor::device::copy: copying to unallocated shape and stride"};
+
+                    size_t mem_size_s = this->dim * sizeof(size_t);
+                    size_t *shape_src, *stride_src;
+                    size_t *shape_dst, *stride_dst;
+
+                    switch(kind) {
+                        case cudaMemcpyHostToDevice: 
+                        case cudaMemcpyDeviceToDevice:
+                            shape_src = shape;
+                            shape_dst = this->shape;
+                            stride_src = stride;
+                            stride_dst = this->stride;
+                            break;
+                            
+                        case cudaMemcpyDeviceToHost:
+                            shape_src = this->shape;
+                            shape_dst = shape;
+                            stride_src = this->stride;
+                            stride_dst = stride;
+                            break;
+
+                        default:
+                            throw std::invalid_argument{"tensor::device::copy: invalid cudaMemcpyKind"};
+                            break;
+                    }
+
+                    cudaMemcpy(shape_dst, shape_src, mem_size_s, kind);
+                    cudaMemcpy(stride_dst, stride_src, mem_size_s, kind);
                 }
 
                 return *this;     
             }
 
-            device& copy(const T* const x, const size_t* const shape, const size_t* const stride, cudaMemcpyKind kind) {
+            /**
+             * @brief copy will always be made to the internal object except if Host is destination
+             */
+            device& copy(T* const x, size_t* const shape, size_t* const stride, cudaMemcpyKind kind) {
                 return this->copy(x, kind).copy(shape, stride, kind);
             }
 
@@ -161,6 +223,7 @@ namespace kernel {
                 this->shape = this->stride = nullptr;
                 this->n = 0;
                 this->dim = 0;               
+                this->transposed = false;
             }
 
             device& operator=(const device& obj) {
@@ -171,6 +234,7 @@ namespace kernel {
 
                 this->n = obj.n;
                 this->dim = obj.dim;
+                this->transposed = obj.transposed;
                 this->allocate(this->n, this->dim).copy(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
             }
 
@@ -185,24 +249,25 @@ namespace kernel {
                 this->shape = this->stride = nullptr;
                 this->n = 0;
                 this->dim = 0;
+                this->transposed = false;
             }
     };
 
     template <typename T>
-    __global__ void add(const d_variables<T> *A, T* out, size_t count, size_t N) {
+    __global__ void add(const d_variables<T> *A, d_variables<T> out, size_t count, size_t N) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= N)
             return;
 
         T sum = 0;
         for (size_t j = 0; j < count; j++) 
-            sum += A[j][i];
+            sum += A[j].operator[](i);
 
-        out[i] = sum;
+        out.x[i] = sum;
     }
 
     template<typename T>
-    __global__ void matmul(T* A, T* B, T* R, size_t I, size_t J, size_t K) {
+    __global__ void matmul(const d_variables<T> A, const d_variables<T> B, d_variables<T> R, size_t I, size_t J, size_t K) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
         int j = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -212,30 +277,24 @@ namespace kernel {
         for(size_t k = 0; k < K; k++)
             sum += A[(i * K) + k] * B[(k * J) + j];
 
-        R[(i * J) + j] = sum;
+        R.x[(i * J) + j] = sum;
     }
 
     template<typename T>
-    __global__ void dot(T* A, T* B, T* R, size_t n) {
-        int i = blockIdx.x + blockDim.x + threadIdx.x;
-        if (i > n)
+    __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R, size_t N) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= N)
             return;
         
-        *R += *A * *B; 
+        T result = A[i] * B[i];
+        atomicAdd(R.x, result);
     }
 
     template<typename T>
-    __global__ void scalar_dist(T* t, T s, size_t N) {
-        int i = blockIdx.x + blockDim.x + threadIdx.x;
+    __global__ void scalar_dist(d_variables<T> t, T s, size_t N) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= N) return;
 
-        t[i] *= s;
+        t.x[i] *= s;
     }
-
-    __device__ size_t calculate_stride(size_t* stride, size_t* weights, size_t N) {
-        size_t index = 0;
-        for(size_t i = 0; i < N; i++)
-            index += weights[i] * stride[i];
-        return index;
-    } 
 }
