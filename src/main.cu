@@ -28,9 +28,9 @@ int main(void) {
 
     init_tensor_1D<dtype> a = {1, 2, 3, 4};
     init_tensor_1D<dtype> b = {1, 2, 3, 4};
-    tensor<dtype> x(a), y(b);
+    tensor<dtype> x(a), y(b), z(2);
 
-    tensor<dtype> z = x * 2;
+    z = x * z;
 
     cout << "X = " << x << endl;
     cout << "Y = " << y << endl;

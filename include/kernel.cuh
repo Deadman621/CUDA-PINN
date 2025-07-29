@@ -57,6 +57,54 @@ namespace kernel {
             bool x_allocated = false;
             bool shape_allocated = false;
 
+            void copy_to_x(T* x, cudaMemcpyKind kind) const {
+                if (this->n > 0) {
+                    if (!x) throw std::invalid_argument{"device::copy_to: passing nullptr not allowed"};
+                    if (!x_allocated) throw std::invalid_argument{"device::copy_to: copying to unallocated raw data (x)"};
+                
+                    size_t mem_size_x = this->n * sizeof(T); 
+                    const T *src = this->x; T *dst = x;
+
+                    switch(kind) {                            
+                        case cudaMemcpyDeviceToHost:
+                        case cudaMemcpyDeviceToDevice:
+                            break;
+
+                        default:
+                            throw std::invalid_argument{"device::copy_to: invalid cudaMemcpyKind"};
+                            break;                        
+                    }
+                    
+                    cudaMemcpy(dst, src, mem_size_x, kind);
+                }
+            }
+
+            void copy_to_s(size_t* shape, size_t* stride, cudaMemcpyKind kind) {
+                if (this->dim > 0) {
+                    if (!(shape || stride))
+                        throw std::invalid_argument{"device::copy_to: passing nullptrs not allowed"};
+
+                    if (!shape_allocated)
+                        throw std::invalid_argument{"device::copy_to: copying to unallocated shape and stride"};
+
+                    size_t mem_size_s = this->dim * sizeof(size_t);
+                    const size_t *shape_src = this->shape, *stride_src = this->stride;
+                    size_t *shape_dst = shape, *stride_dst = stride;
+
+                    switch(kind) {
+                        case cudaMemcpyDeviceToHost:
+                        case cudaMemcpyDeviceToDevice:
+
+                        default:
+                            throw std::invalid_argument{"device::copy_to: invalid cudaMemcpyKind"};
+                            break;
+                    }
+
+                    cudaMemcpy(shape_dst, shape_src, mem_size_s, kind);
+                    cudaMemcpy(stride_dst, stride_src, mem_size_s, kind);
+                }
+            }
+
         public:
             device(void) = default;
             
@@ -69,7 +117,7 @@ namespace kernel {
             device& allocate(size_t n, size_t dim) {
                 if (x_allocated || shape_allocated)
                     throw std::invalid_argument{
-                        "tensor::device::allocate: reallocating already allocated objects - use reallocate instead"};
+                        "device::allocate: reallocating already allocated objects - use reallocate instead"};
 
                 this->n = n;
                 this->dim = dim;
@@ -93,12 +141,22 @@ namespace kernel {
             }
             
             device& reshape(size_t dim) {
-                if (this->dim != dim && dim != 0) {
-                    this->dim = dim;
-
+                if (dim == 0) {                   
                     if (this->shape) cudaFree(this->shape);
                     if (this->stride) cudaFree(this->stride);
 
+                    shape_allocated = false;
+                    
+                    this->dim = 0;               
+                    this->transposed = false;
+                    this->shape = this->stride = nullptr;
+                }
+
+                else if (this->dim != dim) {
+                    if (this->shape) cudaFree(this->shape);
+                    if (this->stride) cudaFree(this->stride);
+
+                    this->dim = dim;
                     size_t mem_size_s = this->dim * sizeof(size_t);
                     cudaMalloc(&this->shape, mem_size_s);
                     cudaMalloc(&this->stride, mem_size_s);
@@ -109,10 +167,17 @@ namespace kernel {
             }
 
             device& resize(size_t n) {      
-                if (this->n != n && n != 0) {
-                    this->n = n;
+                if (n == 0) {
+                    if (this->x) cudaFree(this->x);                    
+                    x_allocated = false;
+                    this->x = nullptr;
+                    this->n = 0;
+                }
+
+                else if (this->n != n) {
                     if (this->x) cudaFree(this->x);
-                    
+
+                    this->n = n;
                     size_t mem_size_x = this->n * sizeof(T);
                     cudaMalloc(&this->x, mem_size_x);  
                     cudaMemset(this->x, 0, mem_size_x);
@@ -123,75 +188,57 @@ namespace kernel {
             }
 
             device& reallocate(size_t n, size_t dim) {
-                if (!x_allocated || !shape_allocated)
-                    throw std::invalid_argument {
-                        "tensor::device::reallocate: calling reallocate on unallocated variable(s) - use allocate instead"
-                    };
-
                 return this->resize(n).reshape(dim);
             }
             
-            device& copy(T* const x, cudaMemcpyKind kind) {
+            device& copy_from(const T* x, cudaMemcpyKind kind) {
                 if (this->n > 0) {
-                    if (!x) throw std::invalid_argument{"tensor::device::copy: passing nullptr not allowed"};
-                    if (!x_allocated) throw std::invalid_argument{"tensor::device::copy: copying to unallocated raw data (x)"};
+                    if (!x) throw std::invalid_argument{"device::copy_from: passing nullptr not allowed"};
+                    if (!x_allocated) throw std::invalid_argument{"device::copy_from: copying to unallocated raw data (x)"};
                 
-                    size_t mem_size_x = this->n * sizeof(T); 
-                    T *src, *dst;
-
                     switch(kind) {
                         case cudaMemcpyHostToDevice:                          
                         case cudaMemcpyDeviceToDevice:
-                            src = x;
-                            dst = this->x;
-                            break;
-                            
-                        case cudaMemcpyDeviceToHost:
-                            src = this->x;
-                            dst = x;
                             break;
 
                         default:
-                            throw std::invalid_argument{"tensor::device::copy: invalid cudaMemcpyKind"};
+                            throw std::invalid_argument{"device::copy_from: invalid cudaMemcpyKind"};
                             break;                        
                     }
                     
+                    size_t mem_size_x = this->n * sizeof(T); 
+                    const T *src = x; T *dst = this->x;
+
                     cudaMemcpy(dst, src, mem_size_x, kind);
                 }
 
                 return *this;
             } 
 
-            device& copy(size_t* const shape, size_t* const stride, cudaMemcpyKind kind) {                
+            const device& copy_to(T* x, cudaMemcpyKind kind) const {
+                this->copy_to_x(x, kind);
+                return *this;                
+            }
+
+            device& copy_from(const size_t* shape, const size_t* stride, cudaMemcpyKind kind) {                
                 if (this->dim > 0) {
                     if (!(shape || stride))
-                        throw std::invalid_argument{"tensor::device::copy: passing nullptrs not allowed"};
+                        throw std::invalid_argument{"device::copy_from: passing nullptrs not allowed"};
 
                     if (!shape_allocated)
-                        throw std::invalid_argument{"tensor::device::copy: copying to unallocated shape and stride"};
+                        throw std::invalid_argument{"device::copy_from: copying to unallocated shape and stride"};
 
                     size_t mem_size_s = this->dim * sizeof(size_t);
-                    size_t *shape_src, *stride_src;
-                    size_t *shape_dst, *stride_dst;
+                    const size_t *shape_src = shape, *stride_src = stride;
+                    size_t *shape_dst = this->shape, *stride_dst = this->stride;
 
                     switch(kind) {
                         case cudaMemcpyHostToDevice: 
                         case cudaMemcpyDeviceToDevice:
-                            shape_src = shape;
-                            shape_dst = this->shape;
-                            stride_src = stride;
-                            stride_dst = this->stride;
-                            break;
-                            
-                        case cudaMemcpyDeviceToHost:
-                            shape_src = this->shape;
-                            shape_dst = shape;
-                            stride_src = this->stride;
-                            stride_dst = stride;
                             break;
 
                         default:
-                            throw std::invalid_argument{"tensor::device::copy: invalid cudaMemcpyKind"};
+                            throw std::invalid_argument{"device::copy_from: invalid cudaMemcpyKind"};
                             break;
                     }
 
@@ -202,17 +249,30 @@ namespace kernel {
                 return *this;     
             }
 
+            const device& copy_to(size_t* shape, size_t* stride, cudaMemcpyKind kind) const {                
+                this->copy_to_s(shape, stride, kind);
+                return *this;     
+            }
+        
             /**
              * @brief copy will always be made to the internal object except if Host is destination
              */
-            device& copy(T* const x, size_t* const shape, size_t* const stride, cudaMemcpyKind kind) {
-                return this->copy(x, kind).copy(shape, stride, kind);
+            device& copy_from(const T* x, const size_t* shape, const size_t* stride, cudaMemcpyKind kind) {
+                return this->copy_from(x, kind).copy_from(shape, stride, kind);
+            }
+
+            device& copy_to(T* x, size_t* shape, size_t* stride, cudaMemcpyKind kind) {
+                return this->copy_to(x, kind).copy_to(shape, stride, kind);
+            }
+
+            const device& copy_to(T* x, size_t* shape, size_t* stride, cudaMemcpyKind kind) const {
+                return this->copy_to(x, kind).copy_to(shape, stride, kind);
             }
 
             d_variables<T>& data(void) { return *this; }
             const d_variables<T>& data(void) const { return *this; }
 
-            device& relinquish(void) const {
+            device& relinquish(void) {
                 if (this->x) cudaFree(this->x);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
@@ -224,6 +284,8 @@ namespace kernel {
                 this->n = 0;
                 this->dim = 0;               
                 this->transposed = false;
+
+                return *this;
             }
 
             device& operator=(const device& obj) {
