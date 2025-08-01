@@ -111,8 +111,24 @@ namespace kernel {
             device(const device& obj) {
                 this->n = obj.n;
                 this->dim = obj.dim;
-                this->allocate(this->n, this->dim).copy(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
+                this->allocate(this->n, this->dim).copy_from(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
             } 
+
+            device(device&& obj) noexcept: x_allocated{obj.x_allocated}, shape_allocated{obj.shape_allocated} {
+                this->x = obj.x;
+                this->n = obj.n;
+                this->dim = obj.dim;
+                this->shape = obj.shape;
+                this->stride = obj.stride;
+                this->transposed = obj.transposed;
+
+                obj.x = nullptr;
+                obj.n = 0;
+                obj.dim = 0;
+                obj.shape = nullptr;
+                obj.stride = nullptr;
+                obj.transposed = false;
+            }
 
             device& allocate(size_t n, size_t dim) {
                 if (x_allocated || shape_allocated)
@@ -187,9 +203,7 @@ namespace kernel {
                 return *this;
             }
 
-            device& reallocate(size_t n, size_t dim) {
-                return this->resize(n).reshape(dim);
-            }
+            device& reallocate(size_t n, size_t dim) { return this->resize(n).reshape(dim); }
             
             device& copy_from(const T* x, cudaMemcpyKind kind) {
                 if (this->n > 0) {
@@ -289,7 +303,7 @@ namespace kernel {
             }
 
             device& operator=(const device& obj) {
-
+                if (this == &obj) return *this;
                 if (this->x) cudaFree(this->x);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
@@ -298,6 +312,28 @@ namespace kernel {
                 this->dim = obj.dim;
                 this->transposed = obj.transposed;
                 this->allocate(this->n, this->dim).copy(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
+
+                return *this;
+            }
+
+            device& operator=(device&& obj) noexcept {
+                if (this == &obj) return *this;
+
+                this->x = obj.x;
+                this->n = obj.n;
+                this->dim = obj.dim;
+                this->shape = obj.shape;
+                this->stride = obj.stride;
+                this->transposed = obj.transposed;
+
+                obj.x = nullptr;
+                obj.n = 0;
+                obj.dim = 0;
+                obj.shape = nullptr;
+                obj.stride = nullptr;
+                obj.transposed = false;
+
+                return *this;
             }
 
             ~device(void) {
@@ -323,7 +359,7 @@ namespace kernel {
 
         T sum = 0;
         for (size_t j = 0; j < count; j++) 
-            sum += A[j].operator[](i);
+            sum += A[j][i];
 
         out.x[i] = sum;
     }
