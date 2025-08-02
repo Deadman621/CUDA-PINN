@@ -1,8 +1,11 @@
 #pragma once
 
 #include<initializer_list>
+#include<type_traits>
 #include<algorithm>
 #include<stdexcept>
+#include<concepts>
+#include<cstddef>
 #include<cstring>
 #include<vector>
 
@@ -29,20 +32,23 @@ static std::string vec_to_str(const std::vector<T>& v) {
     return oss.str();
 }
 
-template<typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value>::type>
+template<typename T>
 class init_tensor {
+
+    static_assert(std::is_arithmetic_v<T>, "init_tensor only supports arithmetic types");
 
     template<typename U>
     friend std::ostream& operator<<(std::ostream&, const init_tensor<U>&);
 
     template<typename U>
     friend void opHelper(std::ostream&, const init_tensor<U>&, size_t, size_t);
-
+    
     protected:
         T *x = nullptr;
         size_t n = 0;
         std::vector<size_t> shape;
         std::vector<size_t> stride;
+        using s_size_t = std::make_signed_t<size_t>;
 
         virtual bool mem_avail(void) const noexcept { return this->x; }
 

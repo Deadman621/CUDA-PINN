@@ -351,10 +351,21 @@ namespace kernel {
             }
     };
 
-    template <typename T>
-    __global__ void add(const d_variables<T> *A, d_variables<T> out, size_t count, size_t N) {
+    // Use obj.x[index] if you're sure that obj is not transposed
+
+    template<typename T>
+    __global__ void add(d_variables<T> out, const d_variables<T> a, const d_variables<T> b) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= N)
+        if (i >= out.n) 
+            return;
+
+        out.x[i] = a[i] + b[i];
+    }
+
+    template <typename T>
+    __global__ void add_multiple(const d_variables<T> *A, d_variables<T> out, size_t count) {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= out.n)
             return;
 
         T sum = 0;
@@ -379,9 +390,9 @@ namespace kernel {
     }
 
     template<typename T>
-    __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R, size_t N) {
+    __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= N)
+        if (i >= R.n)
             return;
         
         T result = A[i] * B[i];
@@ -389,9 +400,9 @@ namespace kernel {
     }
 
     template<typename T>
-    __global__ void scalar_dist(d_variables<T> t, T s, size_t N) {
+    __global__ void scalar_dist(d_variables<T> t, T s) {
         int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= N) return;
+        if (i >= t.n) return;
 
         t.x[i] *= s;
     }
