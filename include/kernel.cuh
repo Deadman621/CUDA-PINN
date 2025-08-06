@@ -1,5 +1,6 @@
 #pragma once
 
+#include<stdexcept>
 namespace kernel {
     
     template<typename T>
@@ -354,17 +355,17 @@ namespace kernel {
     // Use obj.x[index] if you're sure that obj is not transposed
 
     template<typename T>
-    __global__ void add(d_variables<T> out, const d_variables<T> a, const d_variables<T> b) {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
+    __global__ void add(const d_variables<T> a, const d_variables<T> b, d_variables<T> out) {
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= out.n) 
             return;
 
-        out.x[i] = a[i] + b[i];
+        out[i] = a[i] + b[i];
     }
 
-    template <typename T>
+    template<typename T>
     __global__ void add_multiple(const d_variables<T> *A, d_variables<T> out, size_t count) {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= out.n)
             return;
 
@@ -377,8 +378,8 @@ namespace kernel {
 
     template<typename T>
     __global__ void matmul(const d_variables<T> A, const d_variables<T> B, d_variables<T> R, size_t I, size_t J, size_t K) {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        int j = blockIdx.y * blockDim.y + threadIdx.y;
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+        const size_t j = blockIdx.y * blockDim.y + threadIdx.y;
 
         if (i >= I || j >= J) return;
                                                                   
@@ -386,13 +387,13 @@ namespace kernel {
         for(size_t k = 0; k < K; k++)
             sum += A[(i * K) + k] * B[(k * J) + j];
 
-        R.x[(i * J) + j] = sum;
+        R[(i * J) + j] = sum;
     }
 
     template<typename T>
     __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= R.n)
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= A.n)
             return;
         
         T result = A[i] * B[i];
@@ -401,7 +402,7 @@ namespace kernel {
 
     template<typename T>
     __global__ void scalar_dist(d_variables<T> t, T s) {
-        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= t.n) return;
 
         t.x[i] *= s;

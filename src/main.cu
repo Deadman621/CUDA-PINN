@@ -1,23 +1,20 @@
+#include<cstdio>
 #include<iostream>
-#include<vector>
-#include<initializer_list>
-#include<tensor.cuh>
 #include<memory>
-#include<signal.h>
+#include<tensor.cuh>
+#include<init_tensor.h>
 
 using namespace std;
+using tensor_d = tensor<double>;
 
 int main(void) {
     cout << endl;
-    using tensor_d = tensor<double>;
 
-    tensor_d a = tensor_d({1, 2, 3});
-    tensor_d b = tensor_d({4, 5, 6});
-    tensor_d c = tensor_d({7, 8, 9});
+    std::unique_ptr<tensor_d> ptr(new tensor_d({{1, 2}, {3, 4}}));
+    auto result = tensor_d::matmul(*ptr, tensor_d({{5, 6}, {7, 8}}));
+    std::cout << "Result = " << result << std::endl;
 
-    auto result = tensor_d::add(a, b);
-
-    cout << result << endl;
+    auto raw = ptr->raw();
 
     cout << endl;
     return 0;

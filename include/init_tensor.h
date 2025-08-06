@@ -2,8 +2,10 @@
 
 #include<initializer_list>
 #include<type_traits>
+#include<iostream>
 #include<algorithm>
 #include<stdexcept>
+#include<sstream>
 #include<concepts>
 #include<cstddef>
 #include<cstring>
@@ -33,26 +35,37 @@ static std::string vec_to_str(const std::vector<T>& v) {
 }
 
 template<typename T>
+concept arithmetic = requires(T a, T b) {
+    { a + b } -> std::same_as<T>;
+    { a - b } -> std::same_as<T>;
+    { a * b } -> std::same_as<T>;
+    { a / b } -> std::same_as<T>;
+};
+
+template<arithmetic T>
 class init_tensor {
 
-    static_assert(std::is_arithmetic_v<T>, "init_tensor only supports arithmetic types");
-
-    template<typename U>
+    template<arithmetic U>
     friend std::ostream& operator<<(std::ostream&, const init_tensor<U>&);
 
-    template<typename U>
+    template<arithmetic U>
     friend void opHelper(std::ostream&, const init_tensor<U>&, size_t, size_t);
-    
+
     protected:
         T *x = nullptr;
         size_t n = 0;
         std::vector<size_t> shape;
         std::vector<size_t> stride;
+
         using s_size_t = std::make_signed_t<size_t>;
+
+        using init_tensor_0D = T;
+        using init_tensor_1D = std::initializer_list<T>;
+        using init_tensor_ND = std::initializer_list<init_tensor>;
 
         virtual bool mem_avail(void) const noexcept { return this->x; }
 
-        size_t calculate_stride(std::initializer_list<size_t> weights) const {
+        [[nodiscard]] size_t calculate_stride(std::initializer_list<size_t> weights) const {
             if (weights.size() != this->stride.size())
                 throw std::invalid_argument{"tensor::calculate_stride: invalid indices provided"};
 
@@ -70,7 +83,7 @@ class init_tensor {
     public:
         init_tensor(void): shape(0), stride(0) {}
 
-        init_tensor(const T& scalar): n{1} {
+        explicit init_tensor(const init_tensor_0D& scalar): n{1} {
             this->shape.resize(0);
             this->stride.resize(0);
             this->x = new T[this->n];
@@ -89,7 +102,7 @@ class init_tensor {
             }
         }
 
-        init_tensor(const std::initializer_list<T> list): n{list.size()} {
+        init_tensor(const init_tensor_1D list): n{list.size()} {
             shape.push_back(this->n);
             stride.push_back(1);
 
@@ -98,7 +111,7 @@ class init_tensor {
             std::copy(list.begin(), list.end(), this->x);
         }
 
-        init_tensor(const std::initializer_list<init_tensor<T>> list) {
+        init_tensor(const init_tensor_ND list) {
             const size_t list_size = list.size();
             if (list_size == 0) return;
 
@@ -163,7 +176,7 @@ class init_tensor {
             return *this;
         }
 
-        init_tensor& operator=(const std::initializer_list<T> list) {
+        init_tensor& operator=(const init_tensor_1D list) {
             if (this->x) delete[] this->x;
             this->shape.resize(0);
             this->stride.resize(0);
@@ -180,7 +193,7 @@ class init_tensor {
             return *this;
         }
 
-        init_tensor& operator=(const std::initializer_list<init_tensor<T>> list) {  
+        init_tensor& operator=(const init_tensor_ND list) {  
             if (this->x) delete[] this->x;
             this->shape.resize(0);
             this->stride.resize(0);
@@ -211,7 +224,7 @@ class init_tensor {
             return *this;
         }
 
-        init_tensor& operator=(const T& scalar) {
+        init_tensor& operator=(const init_tensor_0D& scalar) {
             if (x) delete[] x;
             this->x = nullptr;
             this->n = 1;
@@ -224,9 +237,8 @@ class init_tensor {
             return *this;
         }
 
-
         template<typename... Indices>
-        T& operator()(Indices... indices) {
+        [[nodiscard]] T& operator()(Indices... indices) {
             constexpr size_t count = sizeof...(indices);
             static_assert((std::is_integral_v<Indices> && ...), "init_tensor::operator(): all arguments must be unsigned numbers");
             if (!this->mem_avail() || count != this->dim()) throw std::out_of_range{"init_tensor::operator(): invalid access"};
@@ -236,11 +248,22 @@ class init_tensor {
             return this->x[linear_index];
         }
 
-        inline size_t size(void) const noexcept { return this->n; }
-        inline std::vector<size_t> get_shape(void) const noexcept { return this->shape; }
-        inline std::vector<size_t> get_stride(void) const noexcept { return this->stride; }
-        inline size_t dim(void) const noexcept { return this->shape.size(); }
-        inline const T *raw(void) const noexcept { return this->x; }
+        template<typename... Indices>
+        [[nodiscard]] const T& operator()(Indices... indices) const {
+            constexpr size_t count = sizeof...(indices);
+            static_assert((std::is_integral_v<Indices> && ...), "init_tensor::operator(): all arguments must be unsigned numbers");
+            if (!this->mem_avail() || count != this->dim()) throw std::out_of_range{"init_tensor::operator(): invalid access"};
+
+            size_t linear_index = this->calculate_stride({ static_cast<size_t>(indices)... });
+
+            return this->x[linear_index];
+        }
+
+        [[nodiscard]] inline size_t size(void) const noexcept { return this->n; }
+        [[nodiscard]] inline std::vector<size_t> get_shape(void) const noexcept { return this->shape; }
+        [[nodiscard]] inline std::vector<size_t> get_stride(void) const noexcept { return this->stride; }
+        [[nodiscard]] inline size_t dim(void) const noexcept { return this->shape.size(); }
+        [[nodiscard]] inline const T *raw(void) const noexcept { return this->x; }
 
         init_tensor<T>& reshape(const std::vector<size_t>& shape) { 
             size_t product = 1;
@@ -259,26 +282,47 @@ class init_tensor {
 
         init_tensor<T>& resize(const std::vector<size_t>& shape) {
             if (this->x) delete[] this->x;
+
             this->shape = shape;
             this->stride = init_tensor<T>::deduce_stride(this->shape);
-
             this->n = 1;
-            for(const auto& i: this->shape)
-                n *= i;
+
+            if (this->shape.size() > 0) {
+                for(const auto& i: this->shape)
+                    n *= i;
+            }
 
             if (this->n != 0) this->x = new T[this->n];
+            std::memset(this->x, 0, this->n);
 
             return *this;        
         }
+
+        init_tensor& assign(const init_tensor_1D list) {
+            if (!mem_avail())
+                throw std::runtime_error{"init_tensor::assign: shape unavailable or not set"};
+            
+            std::vector<size_t> shape = init_tensor<T>::deduce_shape(list);
+            if (this->shape != shape) {
+                throw std::invalid_argument{
+                    "init_tensor::assign: shape mismatch - " + vec_to_str(this->shape) + " != " + vec_to_str(shape)
+                };
+            }
+            
+            if (this->n == 0) return *this;
+            std::copy(list.begin(), list.end(), this->x);
+
+            return *this;
+        }
         
-        init_tensor& assign(const std::initializer_list<init_tensor<T>> list) {
+        init_tensor& assign(const init_tensor_ND list) {
             if (!mem_avail())
                 throw std::runtime_error{"init_tensor::assign: shape unavailable or not set"};
                 
-            std::vector<size_t> __shape__ = init_tensor<T>::deduce_shape(list);
-            if (this->shape != __shape__) {
+            std::vector<size_t> shape = init_tensor<T>::deduce_shape(list);
+            if (this->shape != shape) {
                 throw std::invalid_argument{
-                    "init_tensor::assign: shape mismatch - " + vec_to_str(this->shape) + " != " + vec_to_str(__shape__)
+                    "init_tensor::assign: shape mismatch - " + vec_to_str(this->shape) + " != " + vec_to_str(shape)
                 };
             }
 
@@ -292,68 +336,91 @@ class init_tensor {
         }
         
         init_tensor& assign(const T& scalar) {
-            if (!this->mem_avail() || !this->shape.empty())
-            throw std::runtime_error{"init_tensor::assign: shape unavailable or inconsistent"};
-            
+            if (!this->mem_avail() || this->shape.empty())
+                throw std::runtime_error{"init_tensor::assign: shape unavailable or inconsistent"};
+
             *(this->x) = scalar;
+
             return *this;
         }
-        
-        static std::vector<size_t> deduce_shape(const std::initializer_list<init_tensor<T>> list) {
-            std::vector<size_t> __shape__;
-            
+
+        init_tensor& flat_assign(const std::vector<T> list) {
+            if (!this->mem_avail())
+                throw std::runtime_error{"init_tensor::flat_assign: memory unavailable"};
+
+            if (this->n != list.size()) {
+                throw std::invalid_argument{
+                    "init_tensor::flat_assign: list size doesn't match tensor size - " + list.size() + " != " + this->n
+                };
+            }
+
+            if (this->n == 0) return *this;
+            std::copy(list.begin(), list.end(), this->x);
+
+            return *this;
+        }
+
+        static std::vector<size_t> deduce_shape(const init_tensor_1D list) { 
+            return {list.size()}; 
+        }
+
+        static std::vector<size_t> deduce_shape(const init_tensor_ND list) {
+            std::vector<size_t> shape;
+
             const size_t list_size = list.size();
-            if (list_size == 0) return __shape__;
-            
-            const init_tensor<T> &first = *list.begin(); 
-        
-            __shape__.push_back(list_size);
-            __shape__.insert(__shape__.end(), first.shape.begin(), first.shape.end());
-        
+            if (list_size == 0) return shape;
+
+            const init_tensor<T> &first = *list.begin();
+
+            shape.push_back(list_size);
+            shape.insert(shape.end(), first.shape.begin(), first.shape.end());
+
             for(const init_tensor<T>& i: list) {
-                if (i.shape != first.shape) 
-                    throw std::invalid_argument{"init_tensor::deduce_shape: inconistent shape"};                
+                if (i.shape != first.shape)
+                    throw std::invalid_argument{"init_tensor::deduce_shape: inconistent shape"};
             }
-        
-            return __shape__;
+
+            return shape;
         }
 
-        static std::vector<size_t> deduce_stride(const std::vector<size_t>& shape) {
-            const size_t shape_size = shape.size();
-            if (shape_size == 0) throw std::runtime_error{"init_tensor::deduce_stride: invalid shape"};
+        static std::vector<size_t> deduce_stride(const std::vector<size_t>& shape) noexcept {
+            const auto shape_size = static_cast<s_size_t>(shape.size());
+            if (shape_size == 0) return {};
 
-            std::vector<size_t> __stride__(shape_size);
-            __stride__[shape_size - 1] = 1;
+            std::vector<size_t> stride(shape_size);
+            stride[shape_size - 1] = 1;
             if (shape_size > 1) {
-                for(int i = shape_size - 2; i >= 0; i--) 
-                    __stride__[i] = shape[i + 1] * __stride__[i + 1];
+                for(s_size_t i = shape_size - 2; i >= 0; i--)
+                    stride[i] = shape[i + 1] * stride[i + 1];
             }
 
-            return __stride__;
+            return stride;
         }
 
-        static std::vector<T> flatten(const std::initializer_list<init_tensor<T>> list) {
-            std::vector<size_t> __shape__;
-            std::vector<T> __flat__;
+        static std::vector<T> flatten(const init_tensor_ND list) {
+            std::vector<size_t> shape;
+            std::vector<T> flat;
 
             const size_t list_size = list.size();
-            if (list_size == 0) return __flat__;
+            if (list_size == 0) return flat;
             
             const init_tensor<T> &first = *list.begin();
             
-            __shape__.push_back(list_size);
-            __shape__.insert(__shape__.end(), first.shape.begin(), first.shape.end());
+            shape.push_back(list_size);
+            shape.insert(shape.end(), first.shape.begin(), first.shape.end());
             size_t n = list_size * first.n;
             
-            __flat__.resize(n);
+            flat.resize(n);
+            auto alias = flat.begin();
             for(const init_tensor<T>& i: list) {
                 if (i.shape != first.shape) throw std::invalid_argument{"init_tensor::flatten: inconsistent shape"}; 
-                auto start = __flat__.begin(), end = start + i.n;               
-                std::copy(i.x, i.x + i.n, __flat__.begin());
-            }                          
+                alias = std::copy(i.x, i.x + i.n, alias);
+            }
+
+            return flat;
         }
 
-        ~init_tensor(void) {
+        virtual ~init_tensor(void) {
             if (this->x) delete[] x;
 
             this->n = 0;
@@ -362,7 +429,7 @@ class init_tensor {
         }
 };
 
-template<typename T>
+template<arithmetic T>
 void opHelper(std::ostream& output, const init_tensor<T>& obj, size_t index, size_t dim = 1) {
     
     size_t offset = obj.stride[dim - 1];
@@ -388,11 +455,9 @@ void opHelper(std::ostream& output, const init_tensor<T>& obj, size_t index, siz
             output << ", ";
     }
     output << ']';
-
-    return;
 }
 
-template<typename T>
+template<arithmetic T>
 std::ostream& operator<<(std::ostream& output, const init_tensor<T>& obj) {
     if (!obj.mem_avail())
         return output;

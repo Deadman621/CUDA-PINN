@@ -1,4 +1,8 @@
+.cache
+.idea
 .vscode/
+.clangd
 build/
 test.cpp
 test.out
+cmake-build-debug
