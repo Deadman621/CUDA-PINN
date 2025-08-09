@@ -20,5 +20,5 @@ set(SOURCES
 add_executable(PINN ${SOURCES})
 
 set_target_properties(PINN PROPERTIES
-    CUDA_ARCHITECTURES "native"
+    CUDA_ARCHITECTURES native
 )

@@ -1,12 +1,17 @@
 #pragma once
 
+#include<compare>
+#include<cstddef>
 #include<cstdio>
+#include<stdexcept>
 #include<unordered_set>
 #include<init_tensor.h>
 #include<kernel.cuh>
+#include<optional>
+#include<utility>
 
-using std::cout;
-using std::endl;
+/* using std::cout; 
+using std::endl;  */
 
 static constexpr size_t OFFSET_TO_GPU = 10000;
 
@@ -219,28 +224,51 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        static bool broadcast_possible(const std::vector<size_t>& a, const std::vector<size_t>& b) {
-            s_size_t i = static_cast<s_size_t>(a.size()) - 1;
-            s_size_t j = static_cast<s_size_t>(b.size()) - 1;
-            
-            while(i >= 0 || j >= 0) {
-                size_t x = i >= 0? a[i--]: 1;
-                size_t y = j >= 0? b[j--]: 1;
-                if ((x != y) && (x != 1 && y != 1)) 
-                    return false;
-            }
+        using const_ptr = const tensor<T>*;
+        using op_tensor = std::optional<std::pair<const_ptr, const_ptr>>;
 
-            return true;
+        static op_tensor broadcast_order(const tensor<T>&& a, const tensor<T>&& b) = delete;
+        static op_tensor broadcast_order(const tensor<T>&& a, const tensor<T>&  b) = delete;
+        static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&& b) = delete;
+
+        static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&  b) {
+            if (!memory_check(a, b)) 
+                throw std::invalid_argument{"tensor::broadcast_order"};
+
+            const std::vector<size_t>& s_a = a.shape;
+            const std::vector<size_t>& s_b = b.shape;
+        
+            auto i = static_cast<s_size_t>(s_a.size()) - 1;
+            auto j = static_cast<s_size_t>(s_b.size()) - 1;
+            size_t m = 0, n = 0;
+
+            std::strong_ordering cmp = j <=> i;
+            while(i >= 0 || j >= 0) {
+                size_t x = i >= 0? s_a[i--]: 1;
+                size_t y = j >= 0? s_b[j--]: 1;
+                if (cmp == 0) cmp = s_b[n++] <=> s_a[m++]; 
+                if ((x != y) && (x != 1 && y != 1)) 
+                    return std::nullopt;
+            }   
+
+            if (cmp == std::strong_ordering::greater) return std::make_pair(&b, &a); 
+            if (cmp == std::strong_ordering::less   ) return std::make_pair(&a, &b);
+            else return std::make_pair(&a, &b);
         }
 
         tensor<T>& add(const tensor<T>& t) {
             if (!tensor<T>::memory_check(*this, t)) 
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
 
-            if (*this != t) throw std::invalid_argument("tensor::add: incompaitable shape or size"); 
-            
+            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
+            if (*this != t && !broadcast_check.has_value())
+                throw std::invalid_argument{"tensor::add: incompaitable shape or size"};
+        
+            auto x = broadcast_check.value().first;
+            if (x != this) throw std::invalid_argument{"tensor::add: incompaitable shape or size"};
+
             int block_size = 256;
-            int grid_size = (this->n + block_size - 1) / block_size;
+            int grid_size = (x->n + block_size - 1) / block_size;
 
             kernel::add<<<grid_size, block_size>>>(this->device.data(), t.device.data(), this->device.data());
             this->device.copy_to(this->x, cudaMemcpyDeviceToHost);
@@ -252,9 +280,11 @@ class tensor: public init_tensor<T> {
             if (!tensor<T>::memory_check(a, b)) 
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
 
-            if (a != b) throw std::invalid_argument("tensor::add: incompaitable shape or size");
+            auto broadcast_check = tensor<T>::broadcast_order(a, b);
+            if (a != b && !broadcast_check.has_value())
+                throw std::invalid_argument("tensor::add: incompaitable shape or size"); 
 
-            tensor<T> result(as_shape, a.shape);
+            tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
             int block_size = 256;
             int grid_size = (result.n + block_size - 1) / block_size;
@@ -265,6 +295,7 @@ class tensor: public init_tensor<T> {
             return result;
         }
 
+        //broadcasting not available here
         template<typename... Tensors>
         static tensor<T> add(const Tensors &...tensors) {
             constexpr size_t count = sizeof...(tensors);
@@ -274,7 +305,7 @@ class tensor: public init_tensor<T> {
 
             const tensor<T> &first = GetFirstTensor(tensors...);
             const std::vector<size_t> &tensor_shape = first.shape;
-            auto tensor_size = static_cast<s_size_t>(first.n);
+            const auto tensor_size = static_cast<s_size_t>(first.n);
 
             if (!tensor<T>::memory_check(tensors...))
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
@@ -497,7 +528,7 @@ template<arithmetic T>
 tensor<T> make_tensor(const typename tensor<T>::init_tensor_0D& scalar) { return tensor<T>(scalar); }
 
 template<arithmetic T>
-tensor<T> make_tensor(const typename tensor<T>::tensor_1D list) { return tensor<T>(list); }
+tensor<T> make_tensor(const typename tensor<T>::init_tensor_1D list) { return tensor<T>(list); }
 
 template<arithmetic T>
-tensor<T> make_tensor(const typename tensor<T>::tensor_ND list) { return tensor<T>(list); }
+tensor<T> make_tensor(const typename tensor<T>::init_tensor_ND list) { return tensor<T>(list); }

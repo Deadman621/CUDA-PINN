@@ -259,11 +259,11 @@ class init_tensor {
             return this->x[linear_index];
         }
 
+        [[nodiscard]] inline const T *raw(void) const noexcept { return this->x; }
         [[nodiscard]] inline size_t size(void) const noexcept { return this->n; }
+        [[nodiscard]] inline size_t dim(void) const noexcept { return this->shape.size(); }
         [[nodiscard]] inline std::vector<size_t> get_shape(void) const noexcept { return this->shape; }
         [[nodiscard]] inline std::vector<size_t> get_stride(void) const noexcept { return this->stride; }
-        [[nodiscard]] inline size_t dim(void) const noexcept { return this->shape.size(); }
-        [[nodiscard]] inline const T *raw(void) const noexcept { return this->x; }
 
         init_tensor<T>& reshape(const std::vector<size_t>& shape) { 
             size_t product = 1;
@@ -350,7 +350,8 @@ class init_tensor {
 
             if (this->n != list.size()) {
                 throw std::invalid_argument{
-                    "init_tensor::flat_assign: list size doesn't match tensor size - " + list.size() + " != " + this->n
+                    "init_tensor::flat_assign: list size doesn't match tensor size - " + 
+                    std::to_string(list.size()) + " != " + std::to_string(this->n)
                 };
             }
 

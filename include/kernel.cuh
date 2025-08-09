@@ -15,11 +15,11 @@ namespace kernel {
         __device__ T& operator[](size_t index) {
             if (transposed) {
                 size_t real_index = 0;
-                for(int i = this->dim - 1; i >= 0; i--) {
+                auto i = static_cast<long long int>(this->dim) - 1;
+                while(i >= 0) {
                     real_index += ((index % this->shape[i]) * this->stride[i]);
-                    index /= this->shape[i];
+                    index /= this->shape[i--];
                 }  
-
                 return x[real_index];                
             }
 
@@ -29,11 +29,11 @@ namespace kernel {
         __device__ const T& operator[](size_t index) const {
             if (transposed) {
                 size_t real_index = 0;
-                for(int i = this->dim - 1; i >= 0; i--) {
+                auto i = static_cast<long long int>(this->dim) - 1;
+                while(i >= 0) {
                     real_index += ((index % this->shape[i]) * this->stride[i]);
-                    index /= this->shape[i];
+                    index /= this->shape[i--];
                 }  
-
                 return x[real_index];                
             }
 
@@ -134,7 +134,7 @@ namespace kernel {
             device& allocate(size_t n, size_t dim) {
                 if (x_allocated || shape_allocated)
                     throw std::invalid_argument{
-                        "device::allocate: reallocating already allocated objects - use reallocate instead"};
+                        "device::allocate: allocating already allocated objects - use reallocate instead"};
 
                 this->n = n;
                 this->dim = dim;
@@ -157,7 +157,7 @@ namespace kernel {
                 return *this;
             }
             
-            device& reshape(size_t dim) {
+            device& reshape(size_t dim) noexcept {
                 if (dim == 0) {                   
                     if (this->shape) cudaFree(this->shape);
                     if (this->stride) cudaFree(this->stride);
@@ -183,7 +183,7 @@ namespace kernel {
                 return *this;
             }
 
-            device& resize(size_t n) {      
+            device& resize(size_t n) noexcept {      
                 if (n == 0) {
                     if (this->x) cudaFree(this->x);                    
                     x_allocated = false;
@@ -204,7 +204,7 @@ namespace kernel {
                 return *this;
             }
 
-            device& reallocate(size_t n, size_t dim) { return this->resize(n).reshape(dim); }
+            device& reallocate(size_t n, size_t dim) noexcept { return this->resize(n).reshape(dim); }
             
             device& copy_from(const T* x, cudaMemcpyKind kind) {
                 if (this->n > 0) {
@@ -287,7 +287,7 @@ namespace kernel {
             d_variables<T>& data(void) { return *this; }
             const d_variables<T>& data(void) const { return *this; }
 
-            device& relinquish(void) {
+            device& relinquish(void) noexcept {
                 if (this->x) cudaFree(this->x);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
@@ -303,7 +303,7 @@ namespace kernel {
                 return *this;
             }
 
-            device& operator=(const device& obj) {
+            device& operator=(const device& obj) noexcept {
                 if (this == &obj) return *this;
                 if (this->x) cudaFree(this->x);
                 if (this->shape) cudaFree(this->shape);
@@ -360,7 +360,7 @@ namespace kernel {
         if (i >= out.n) 
             return;
 
-        out[i] = a[i] + b[i];
+        out[i] = a[i % a.n] + b[i % b.n];
     }
 
     template<typename T>
