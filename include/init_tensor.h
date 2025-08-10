@@ -1,6 +1,7 @@
 #pragma once
 
 #include<initializer_list>
+#include<memory>
 #include<type_traits>
 #include<iostream>
 #include<algorithm>
@@ -52,8 +53,8 @@ class init_tensor {
     friend void opHelper(std::ostream&, const init_tensor<U>&, size_t, size_t);
 
     protected:
-        T *x = nullptr;
         size_t n = 0;
+        std::unique_ptr<T[]> data;
         std::vector<size_t> shape;
         std::vector<size_t> stride;
 
@@ -63,7 +64,7 @@ class init_tensor {
         using init_tensor_1D = std::initializer_list<T>;
         using init_tensor_ND = std::initializer_list<init_tensor>;
 
-        virtual bool mem_avail(void) const noexcept { return this->x; }
+        virtual bool mem_avail(void) const noexcept { return this->data.get(); }
 
         [[nodiscard]] size_t calculate_stride(std::initializer_list<size_t> weights) const {
             if (weights.size() != this->stride.size())
@@ -83,11 +84,9 @@ class init_tensor {
     public:
         init_tensor(void): shape(0), stride(0) {}
 
-        explicit init_tensor(const init_tensor_0D& scalar): n{1} {
+        explicit init_tensor(const init_tensor_0D& scalar): n{1}, data(std::make_unique<T[]>(1)) {
             this->shape.resize(0);
             this->stride.resize(0);
-            this->x = new T[this->n];
-            *this->x = scalar;
         }
 
         init_tensor(as_shape_t, const std::vector<size_t>& shape): shape{shape} {
@@ -96,8 +95,8 @@ class init_tensor {
                 this->n *= i;         
 
             if (this->n != 0) {
-                this->x = new T[this->n];
-                std::memset(this->x, 0, this->n * sizeof(T));
+                this->data = std::make_unique<T[]>(this->n);
+                std::memset(this->data.get(), 0, this->n * sizeof(T));
                 this->stride = init_tensor<T>::deduce_stride(this->shape);
             }
         }
@@ -107,8 +106,8 @@ class init_tensor {
             stride.push_back(1);
 
             if (this->n == 0) return;
-            this->x = new T[this->n];
-            std::copy(list.begin(), list.end(), this->x);
+            this->data = std::make_unique<T[]>(this->n);;
+            std::copy(list.begin(), list.end(), this->data.get());
         }
 
         init_tensor(const init_tensor_ND list) {
@@ -124,25 +123,25 @@ class init_tensor {
             this->n = list_size * first.n;
             
             if (this->n > 0) {
-                this->x = new T[this->n];
-                std::memset(this->x, 0, this->n * sizeof(T));
+                this->data = std::make_unique<T[]>(this->n);
+                std::memset(this->data.get(), 0, this->n * sizeof(T));
 
-                T* alias = this->x;
+                T* alias = this->data.get();
                 for(const init_tensor<T>& i: list) {
                     if (i.shape != first.shape) throw std::invalid_argument{"init_tensor::init_tensor: inconistent shape"};                
-                    alias = std::copy(i.x, i.x + i.n, alias);
+                    alias = std::copy(i.data.get(), i.data.get() + i.n, alias);
                 } 
             }
         }
 
         init_tensor(const init_tensor& obj): n{obj.n}, shape{obj.shape}, stride{obj.stride} {
             if (this->n == 0) return;
-            this->x = new T[this->n];
-            std::copy(obj.x, obj.x + obj.n, this->x);
+            this->data = std::make_unique<T[]>(this->n);
+            std::copy(obj.data.get(), obj.data.get() + obj.n, this->data.get());
         }
 
-        init_tensor(init_tensor&& obj) noexcept: x{obj.x}, n{obj.n}, shape{std::move(obj.shape)}, stride{std::move(obj.stride)} {
-            obj.x = nullptr;
+        init_tensor(init_tensor&& obj) noexcept: 
+        n{obj.n}, data{std::move(obj.data)}, shape{std::move(obj.shape)}, stride{std::move(obj.stride)} {
             obj.n = 0;
         }
         
@@ -154,8 +153,8 @@ class init_tensor {
             this->stride = obj.stride;
             
             if (this->n == 0) return *this;
-            this->x = new T[this->n];
-            std::copy(obj.x, obj.x + obj.n, this->x);
+            this->data = std::make_unique<T[]>(this->n);
+            std::copy(obj.data.get(), obj.data.get() + obj.n, this->data.get());
 
             return *this;
         }
@@ -163,19 +162,18 @@ class init_tensor {
         init_tensor& operator=(init_tensor&& obj) noexcept {
             if (this == &obj) return *this;
 
-            this->x = obj.x;
             this->n = obj.n;
+            this->data = std::move(obj.data);
             this->shape = std::move(obj.shape);
             this->stride = std::move(obj.stride);
             
-            obj.x = nullptr;
             obj.n = 0;
 
             return *this;
         }
 
         init_tensor& operator=(const init_tensor_1D list) {
-            if (this->x) delete[] this->x;
+            this->data.reset();
             this->shape.resize(0);
             this->stride.resize(0);
             
@@ -185,14 +183,14 @@ class init_tensor {
 
             if (this->n == 0) return *this;
             
-            this->x = new T[this->n];
-            std::copy(list.begin(), list.end(), this->x);   
+            this->data = std::make_unique<T[]>(this->n);
+            std::copy(list.begin(), list.end(), this->data.get());   
             
             return *this;
         }
 
         init_tensor& operator=(const init_tensor_ND list) {  
-            if (this->x) delete[] this->x;
+            this->data.reset();
             this->shape.resize(0);
             this->stride.resize(0);
             this->n = 0;
@@ -210,27 +208,26 @@ class init_tensor {
 
             if (this->n == 0) return *this;
 
-            this->x = new T[this->n];
-            std::memset(this->x, 0, this->n * sizeof(T));
+            this->data = std::make_unique<T[]>(this->n);
+            std::memset(this->data.get(), 0, this->n * sizeof(T));
 
-            T* alias = this->x;
+            T* alias = this->data.get();
             for(const init_tensor<T>& i: list) {
                 if (i.shape != first.shape) throw std::invalid_argument{"init_tensor::operator=: inconistent shape"};                
-                alias = std::copy(i.x, i.x + i.n, alias);
+                alias = std::copy(i.data.get(), i.data.get() + i.n, alias);
             }             
 
             return *this;
         }
 
         init_tensor& operator=(const init_tensor_0D& scalar) {
-            if (x) delete[] x;
-            this->x = nullptr;
             this->n = 1;
+            this->data.reset();
             this->shape.resize(0);
             this->stride.resize(0);
 
-            this->x = new T[this->n];
-            *(this->x) = scalar;
+            this->data = std::make_unique<T[]>(this->n);
+            this->data[0] = scalar;
 
             return *this;
         }
@@ -243,7 +240,7 @@ class init_tensor {
 
             size_t linear_index = this->calculate_stride({ static_cast<size_t>(indices)... });
 
-            return this->x[linear_index];
+            return this->data[linear_index];
         }
 
         template<typename... Indices>
@@ -254,10 +251,10 @@ class init_tensor {
 
             size_t linear_index = this->calculate_stride({ static_cast<size_t>(indices)... });
 
-            return this->x[linear_index];
+            return this->data[linear_index];
         }
 
-        [[nodiscard]] inline const T *raw(void) const noexcept { return this->x; }
+        [[nodiscard]] inline const T *raw(void) const noexcept { return this->data.get(); }
         [[nodiscard]] inline size_t size(void) const noexcept { return this->n; }
         [[nodiscard]] inline size_t dim(void) const noexcept { return this->shape.size(); }
         [[nodiscard]] inline std::vector<size_t> get_shape(void) const noexcept { return this->shape; }
@@ -279,8 +276,7 @@ class init_tensor {
         }
 
         init_tensor<T>& resize(const std::vector<size_t>& shape) {
-            if (this->x) delete[] this->x;
-
+            this->data.reset();
             this->shape = shape;
             this->stride = init_tensor<T>::deduce_stride(this->shape);
             this->n = 1;
@@ -291,8 +287,8 @@ class init_tensor {
             }
 
             if (this->n != 0) {
-                this->x = new T[this->n];
-                std::memset(this->x, 0, this->n);
+                this->data = std::make_unique<T[]>(this->n);
+                std::memset(this->data.get(), 0, this->n);
             }
 
             return *this;        
@@ -310,7 +306,7 @@ class init_tensor {
             }
             
             if (this->n == 0) return *this;
-            std::copy(list.begin(), list.end(), this->x);
+            std::copy(list.begin(), list.end(), this->data.get());
 
             return *this;
         }
@@ -328,18 +324,18 @@ class init_tensor {
 
             if (this->n == 0) return *this;
             
-            T* alias = this->x;
+            T* alias = this->data.get();
             for(const init_tensor<T>& i: list)          
-                alias = std::copy(i.x, i.x + i.n, alias);
+                alias = std::copy(i.data.get(), i.data.get() + i.n, alias);
             
             return *this;
         }
         
-        init_tensor& assign(const T& scalar) {
+        init_tensor& assign(const init_tensor_0D& scalar) {
             if (!this->mem_avail() || this->shape.empty())
                 throw std::runtime_error{"init_tensor::assign: shape unavailable or inconsistent"};
 
-            *(this->x) = scalar;
+            this->data[0] = scalar;
 
             return *this;
         }
@@ -356,7 +352,7 @@ class init_tensor {
             }
 
             if (this->n == 0) return *this;
-            std::copy(list.begin(), list.end(), this->x);
+            std::copy(list.begin(), list.end(), this->data.get());
 
             return *this;
         }
@@ -415,15 +411,13 @@ class init_tensor {
             auto alias = flat.begin();
             for(const init_tensor<T>& i: list) {
                 if (i.shape != first.shape) throw std::invalid_argument{"init_tensor::flatten: inconsistent shape"}; 
-                alias = std::copy(i.x, i.x + i.n, alias);
+                alias = std::copy(i.data.get(), i.data.get() + i.n, alias);
             }
 
             return flat;
         }
 
         virtual ~init_tensor(void) {
-            if (this->x) delete[] x;
-
             this->n = 0;
             this->shape.resize(0);
             this->stride.resize(0);
@@ -440,7 +434,7 @@ void opHelper(std::ostream& output, const init_tensor<T>& obj, size_t index, siz
     if (dim == obj.dim()) {
         output << '[';
         for(size_t i = start; i < end; i += offset) {
-            output << obj.x[i];
+            output << obj.data[i];
             if (i != end - offset) 
                 output << ", ";
         }
@@ -464,7 +458,7 @@ std::ostream& operator<<(std::ostream& output, const init_tensor<T>& obj) {
         return output;
 
     if (obj.dim() == 0) {
-        output << *obj.x;
+        output << *obj.data.get();
         return output;
     }
 

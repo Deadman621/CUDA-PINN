@@ -5,7 +5,7 @@ namespace kernel {
     
     template<typename T>
     struct d_variables {
-        T* x = nullptr;
+        T* data = nullptr;
         size_t* shape = nullptr;
         size_t* stride = nullptr;
         size_t dim = 0;
@@ -20,10 +20,10 @@ namespace kernel {
                     real_index += ((index % this->shape[i]) * this->stride[i]);
                     index /= this->shape[i--];
                 }  
-                return x[real_index];                
+                return data[real_index];                
             }
 
-            return x[index];
+            return data[index];
         }
 
         __device__ const T& operator[](size_t index) const {
@@ -34,14 +34,14 @@ namespace kernel {
                     real_index += ((index % this->shape[i]) * this->stride[i]);
                     index /= this->shape[i--];
                 }  
-                return x[real_index];                
+                return data[real_index];                
             }
 
-            return x[index];
+            return data[index];
         }
 
-        __device__ T& operator*() { return *this->x; }
-        __device__ const T& operator*() const { return *this->x; }
+        __device__ T& operator*() { return *this->data; }
+        __device__ const T& operator*() const { return *this->data; }
 
         __device__ size_t calculate_stride(size_t* weights) {
             size_t index = 0;
@@ -55,16 +55,16 @@ namespace kernel {
     class device: public d_variables<T> {
         
         private:
-            bool x_allocated = false;
+            bool data_allocated = false;
             bool shape_allocated = false;
 
             void copy_to_x(T* x, cudaMemcpyKind kind) const {
                 if (this->n > 0) {
                     if (!x) throw std::invalid_argument{"device::copy_to: passing nullptr not allowed"};
-                    if (!x_allocated) throw std::invalid_argument{"device::copy_to: copying to unallocated raw data (x)"};
+                    if (!data_allocated) throw std::invalid_argument{"device::copy_to: copying to unallocated raw data (x)"};
                 
                     size_t mem_size_x = this->n * sizeof(T); 
-                    const T *src = this->x; T *dst = x;
+                    const T *src = this->data; T *dst = x;
 
                     switch(kind) {                            
                         case cudaMemcpyDeviceToHost:
@@ -112,18 +112,18 @@ namespace kernel {
             device(const device& obj) {
                 this->n = obj.n;
                 this->dim = obj.dim;
-                this->allocate(this->n, this->dim).copy_from(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
+                this->allocate(this->n, this->dim).copy_from(obj.data, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
             } 
 
-            device(device&& obj) noexcept: x_allocated{obj.x_allocated}, shape_allocated{obj.shape_allocated} {
-                this->x = obj.x;
+            device(device&& obj) noexcept: data_allocated{obj.data_allocated}, shape_allocated{obj.shape_allocated} {
+                this->data = obj.data;
                 this->n = obj.n;
                 this->dim = obj.dim;
                 this->shape = obj.shape;
                 this->stride = obj.stride;
                 this->transposed = obj.transposed;
 
-                obj.x = nullptr;
+                obj.data = nullptr;
                 obj.n = 0;
                 obj.dim = 0;
                 obj.shape = nullptr;
@@ -132,7 +132,7 @@ namespace kernel {
             }
 
             device& allocate(size_t n, size_t dim) {
-                if (x_allocated || shape_allocated)
+                if (data_allocated || shape_allocated)
                     throw std::invalid_argument{
                         "device::allocate: allocating already allocated objects - use reallocate instead"};
 
@@ -143,9 +143,9 @@ namespace kernel {
                 size_t mem_size_s = this->dim * sizeof(size_t);
 
                 if (this->n > 0) { 
-                    cudaMalloc(&this->x, mem_size_x);
-                    cudaMemset(this->x, 0, mem_size_x);
-                    x_allocated = true;
+                    cudaMalloc(&this->data, mem_size_x);
+                    cudaMemset(this->data, 0, mem_size_x);
+                    data_allocated = true;
                 }
 
                 if (this->dim > 0) {
@@ -185,20 +185,20 @@ namespace kernel {
 
             device& resize(size_t n) noexcept {      
                 if (n == 0) {
-                    if (this->x) cudaFree(this->x);                    
-                    x_allocated = false;
-                    this->x = nullptr;
+                    if (this->data) cudaFree(this->data);                    
+                    data_allocated = false;
+                    this->data = nullptr;
                     this->n = 0;
                 }
 
                 else if (this->n != n) {
-                    if (this->x) cudaFree(this->x);
+                    if (this->data) cudaFree(this->data);
 
                     this->n = n;
                     size_t mem_size_x = this->n * sizeof(T);
-                    cudaMalloc(&this->x, mem_size_x);  
-                    cudaMemset(this->x, 0, mem_size_x);
-                    x_allocated = true;
+                    cudaMalloc(&this->data, mem_size_x);  
+                    cudaMemset(this->data, 0, mem_size_x);
+                    data_allocated = true;
                 }
 
                 return *this;
@@ -209,7 +209,7 @@ namespace kernel {
             device& copy_from(const T* x, cudaMemcpyKind kind) {
                 if (this->n > 0) {
                     if (!x) throw std::invalid_argument{"device::copy_from: passing nullptr not allowed"};
-                    if (!x_allocated) throw std::invalid_argument{"device::copy_from: copying to unallocated raw data (x)"};
+                    if (!data_allocated) throw std::invalid_argument{"device::copy_from: copying to unallocated raw data (x)"};
                 
                     switch(kind) {
                         case cudaMemcpyHostToDevice:                          
@@ -222,7 +222,7 @@ namespace kernel {
                     }
                     
                     size_t mem_size_x = this->n * sizeof(T); 
-                    const T *src = x; T *dst = this->x;
+                    const T *src = x; T *dst = this->data;
 
                     cudaMemcpy(dst, src, mem_size_x, kind);
                 }
@@ -284,17 +284,17 @@ namespace kernel {
                 return this->copy_to(x, kind).copy_to(shape, stride, kind);
             }
 
-            d_variables<T>& data(void) { return *this; }
-            const d_variables<T>& data(void) const { return *this; }
+            d_variables<T>& d_var(void) { return *this; }
+            const d_variables<T>& d_var(void) const { return *this; }
 
             device& relinquish(void) noexcept {
-                if (this->x) cudaFree(this->x);
+                if (this->data) cudaFree(this->data);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
 
-                x_allocated = shape_allocated = false;
+                data_allocated = shape_allocated = false;
                 
-                this->x = nullptr;
+                this->data = nullptr;
                 this->shape = this->stride = nullptr;
                 this->n = 0;
                 this->dim = 0;               
@@ -305,14 +305,14 @@ namespace kernel {
 
             device& operator=(const device& obj) noexcept {
                 if (this == &obj) return *this;
-                if (this->x) cudaFree(this->x);
+                if (this->data) cudaFree(this->data);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
 
                 this->n = obj.n;
                 this->dim = obj.dim;
                 this->transposed = obj.transposed;
-                this->allocate(this->n, this->dim).copy(obj.x, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
+                this->allocate(this->n, this->dim).copy(obj.data, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
 
                 return *this;
             }
@@ -320,14 +320,14 @@ namespace kernel {
             device& operator=(device&& obj) noexcept {
                 if (this == &obj) return *this;
 
-                this->x = obj.x;
+                this->data = obj.data;
                 this->n = obj.n;
                 this->dim = obj.dim;
                 this->shape = obj.shape;
                 this->stride = obj.stride;
                 this->transposed = obj.transposed;
 
-                obj.x = nullptr;
+                obj.data = nullptr;
                 obj.n = 0;
                 obj.dim = 0;
                 obj.shape = nullptr;
@@ -338,13 +338,13 @@ namespace kernel {
             }
 
             ~device(void) {
-                if (this->x) cudaFree(this->x);
+                if (this->data) cudaFree(this->data);
                 if (this->shape) cudaFree(this->shape);
                 if (this->stride) cudaFree(this->stride);
 
-                x_allocated = shape_allocated = false;
+                data_allocated = shape_allocated = false;
                 
-                this->x = nullptr;
+                this->data = nullptr;
                 this->shape = this->stride = nullptr;
                 this->n = 0;
                 this->dim = 0;
@@ -373,7 +373,7 @@ namespace kernel {
         for (size_t j = 0; j < count; j++) 
             sum += A[j][i];
 
-        out.x[i] = sum;
+        out.data[i] = sum;
     }
 
     template<typename T>
@@ -397,7 +397,7 @@ namespace kernel {
             return;
         
         T result = A[i] * B[i];
-        atomicAdd(R.x, result);
+        atomicAdd(R.data, result);
     }
 
     template<typename T>
@@ -405,6 +405,6 @@ namespace kernel {
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= t.n) return;
 
-        t.x[i] *= s;
+        t.data[i] *= s;
     }
 }

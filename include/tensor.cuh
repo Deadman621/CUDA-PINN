@@ -34,9 +34,9 @@ class tensor: public init_tensor<T> {
         using typename init_tensor<T>::init_tensor_1D;
         using typename init_tensor<T>::init_tensor_ND;
 
-        [[nodiscard]] bool mem_avail_h(void) const noexcept { return this->x; }
+        [[nodiscard]] bool mem_avail_h(void) const noexcept { return this->data.get(); }
         [[nodiscard]] bool mem_avail_d(void) const noexcept { return this->device.x; }
-        [[nodiscard]] bool mem_avail(void) const noexcept override { return this->x && this->device.x; }
+        [[nodiscard]] bool mem_avail(void) const noexcept override { return this->data.get() && this->device.data; }
 
         template<typename... Tensors>
         static bool memory_check(const Tensors &...tensors) noexcept {
@@ -47,14 +47,14 @@ class tensor: public init_tensor<T> {
         
         void setup_device_memory(bool shape) {
             this->device.allocate(this->n, this->dim());
-            if (shape) this->device.copy_from(this->x, this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
-            else this->device.copy_from(this->x, cudaMemcpyHostToDevice);
+            if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
+            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
         }
 
         void realloc_device_memory(bool shape) {
             this->device.reallocate(this->n, this->dim());
-            if (shape) this->device.copy_from(this->x, this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
-            else this->device.copy_from(this->x, cudaMemcpyHostToDevice);            
+            if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
+            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);            
         }
         
     public:
@@ -143,7 +143,7 @@ class tensor: public init_tensor<T> {
                 throw std::runtime_error{"tensor::operator*: cannot do arithmetic with uninitialized tensor(s)"};
     
             switch(obj.dim()) {
-                case 0: return tensor<T>::operator*(*obj.x);
+                case 0: return tensor<T>::operator*(*obj.data.get());
                 case 1: return tensor<T>::dot(*this, obj);
                 case 2: return tensor<T>::matmul(*this, obj); 
                 default: throw std::invalid_argument{"tensor::operator*: multiplication on unsupported dimension"};
@@ -159,15 +159,15 @@ class tensor: public init_tensor<T> {
             if (result.n > OFFSET_TO_GPU) {
                 dim3 blockSize(256);
                 dim3 grid_size((result.n * blockSize.x - 1) / blockSize.x);
-                kernel::scalar_dist<<<grid_size, blockSize>>>(result.device.data(), scalar);
-                result.device.copy_to(result.x, cudaMemcpyDeviceToHost);
+                kernel::scalar_dist<<<grid_size, blockSize>>>(result.device.d_var(), scalar);
+                result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
             }
 
             else {
                 for(size_t i = 0; i < result.n; i++)
-                    result.x[i] *= scalar;
+                    result.data[i] *= scalar;
 
-                result.device.copy_from(result.x, cudaMemcpyHostToDevice);
+                result.device.copy_from(result.data.get(), cudaMemcpyHostToDevice);
             }
 
             return result;
@@ -178,7 +178,7 @@ class tensor: public init_tensor<T> {
                 throw std::runtime_error{"tensor::operator*=: cannot do arithmetic with uninitialized tensor(s)"};
 
             switch(obj.dim()) {
-                case 0: return tensor<T>::operator*=(*obj.x);
+                case 0: return tensor<T>::operator*=(*obj.data.get());
                 case 1: return tensor<T>::dot(obj);
                 case 2: return tensor<T>::matmul(obj); 
                 default: throw std::invalid_argument{"tensor::operator*: multiplication on unsupported dimension"};
@@ -192,15 +192,15 @@ class tensor: public init_tensor<T> {
             if (this->n > OFFSET_TO_GPU) {
                 dim3 block_size(256);
                 dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
-                kernel::scalar_dist<<<grid_size, block_size>>>(this->device.data(), scalar);
-                this->device.copy_to(this->x, cudaMemcpyDeviceToHost);
+                kernel::scalar_dist<<<grid_size, block_size>>>(this->device.d_var(), scalar);
+                this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
             }     
             
             else {
                 for(size_t i = 0; i < this->n; i++)
-                    this->x[i] *= scalar;
+                    this->data[i] *= scalar;
 
-                this->device.copy_from(this->x, cudaMemcpyHostToDevice);
+                this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             }
 
             return *this;
@@ -208,19 +208,19 @@ class tensor: public init_tensor<T> {
 
         tensor& assign(const init_tensor_0D& scalar) {
             init_tensor<T>::assign(scalar);
-            this->device.copy_from(this->x, cudaMemcpyHostToDevice);
+            this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             return *this;
         }
 
         tensor& assign(const init_tensor_1D list) {
             init_tensor<T>::assign(list);
-            this->device.copy_from(this->x, cudaMemcpyHostToDevice);
+            this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             return *this;
         }  
 
         tensor& assign(const init_tensor_ND list) {
             init_tensor<T>::assign(list);
-            this->device.copy_from(this->x, cudaMemcpyHostToDevice);
+            this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             return *this;
         }
 
@@ -270,8 +270,8 @@ class tensor: public init_tensor<T> {
             int block_size = 256;
             int grid_size = (x->n + block_size - 1) / block_size;
 
-            kernel::add<<<grid_size, block_size>>>(this->device.data(), t.device.data(), this->device.data());
-            this->device.copy_to(this->x, cudaMemcpyDeviceToHost);
+            kernel::add<<<grid_size, block_size>>>(this->device.d_var(), t.device.d_var(), this->device.d_var());
+            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
 
             return *this;
         }   
@@ -288,9 +288,9 @@ class tensor: public init_tensor<T> {
             
             int block_size = 256;
             int grid_size = (result.n + block_size - 1) / block_size;
-            kernel::add<<<grid_size, block_size>>>(a.device.data(), b.device.data(), result.device.data());
+            kernel::add<<<grid_size, block_size>>>(a.device.d_var(), b.device.d_var(), result.device.d_var());
 
-            result.device.copy_to(result.x, cudaMemcpyDeviceToHost);
+            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -315,7 +315,7 @@ class tensor: public init_tensor<T> {
 
             tensor<T> result(as_shape, tensor_shape);
                 
-            std::vector<kernel::d_variables<T>> devices = {tensors.device.data()...};
+            std::vector<kernel::d_variables<T>> devices = {tensors.device.d_var()...};
 
             kernel::d_variables<T> *d_ptr;
             size_t mem_size = sizeof(kernel::d_variables<T>) * devices.size();
@@ -329,7 +329,7 @@ class tensor: public init_tensor<T> {
             kernel::add_multiple<T><<<grid_size, block_size>>>(d_ptr, result.device, count);
             cudaFree(d_ptr);
             
-            result.device.copy_to(result.x, cudaMemcpyDeviceToHost);
+            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -350,9 +350,9 @@ class tensor: public init_tensor<T> {
             
             dim3 block_size(16, 16);
             dim3 grid_size((i + block_size.x - 1) / block_size.x, (j + block_size.y - 1) / block_size.y);
-            kernel::matmul<<<grid_size, block_size>>>(temp.device.data(), t.device.data(), this->device.data(), i, j, k);
+            kernel::matmul<<<grid_size, block_size>>>(temp.device.d_var(), t.device.d_var(), this->device.d_var(), i, j, k);
             
-            this->device.copy_to(this->x, cudaMemcpyDeviceToHost);
+            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
 
             return *this;            
         }
@@ -371,9 +371,9 @@ class tensor: public init_tensor<T> {
             
             dim3 block(16, 16);
             dim3 grid_size((i + block.x - 1) / block.x, (j + block.y - 1) / block.y);
-            kernel::matmul<<<grid_size, block>>>(a.device.data(), b.device.data(), result.device.data(), i, j, k);
+            kernel::matmul<<<grid_size, block>>>(a.device.d_var(), b.device.d_var(), result.device.d_var(), i, j, k);
             
-            result.device.copy_to(result.x, cudaMemcpyDeviceToHost);
+            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;
         }
@@ -393,9 +393,9 @@ class tensor: public init_tensor<T> {
 
             dim3 block_size(256);
             dim3 grid_size((temp.n + block_size.x - 1) / block_size.x);
-            kernel::dot<<<grid_size, block_size>>>(temp.device.data(), t.device.data(), this->device.data());
+            kernel::dot<<<grid_size, block_size>>>(temp.device.d_var(), t.device.d_var(), this->device.d_var());
             
-            this->device.copy_to(this->x, cudaMemcpyDeviceToHost);
+            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
 
             return *this;
         }
@@ -415,9 +415,9 @@ class tensor: public init_tensor<T> {
 
             dim3 block(256);
             dim3 grid_size((N + block.x - 1) / block.x);
-            kernel::dot<<<grid_size, block>>>(a.device.data(), b.device.data(), result.device.data());
+            kernel::dot<<<grid_size, block>>>(a.device.d_var(), b.device.d_var(), result.device.d_var());
             
-            result.device.copy_to(result.x, cudaMemcpyDeviceToHost);
+            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;
         }
