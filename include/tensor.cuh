@@ -26,7 +26,8 @@ class tensor: public init_tensor<T> {
     friend tensor<U> operator*(const S& scalar, const tensor<U>& obj);
 
     private:
-        kernel::device<T> device;
+        mutable kernel::device<T> device;
+        mutable bool host_dirty = false;
         bool transposed = false;
 
         using typename init_tensor<T>::s_size_t;
@@ -49,27 +50,45 @@ class tensor: public init_tensor<T> {
             this->device.allocate(this->n, this->dim());
             if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
             else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
+            this->host_dirty = false;    
         }
 
         void realloc_device_memory(bool shape) {
             this->device.reallocate(this->n, this->dim());
             if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
-            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);            
+            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);         
+            this->host_dirty = false;
         }
+
+        bool sync_device(void) const { 
+            if (!this->host_dirty) return false;
+            this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice); 
+            this->host_dirty = false;
+            return true;
+        }
+        
+        template<typename... Tensors>
+        static size_t sync_device(const Tensors &...tensors) { return (static_cast<size_t>(tensors.sync_device()) + ...); } 
         
     public:
         tensor(void) = default;
         
-        tensor(const init_tensor_0D &scalar): init_tensor<T>(scalar) { this->setup_device_memory(false); }
-        tensor(const init_tensor_1D list): init_tensor<T>(list) { this->setup_device_memory(true); }
-        tensor(const init_tensor_ND list): init_tensor<T>(list) { this->setup_device_memory(true); }
+        tensor(const init_tensor_0D sclr): init_tensor<T>(sclr) { this->setup_device_memory(false); }
+        tensor(const init_tensor_1D list): init_tensor<T>(list) { this->setup_device_memory(true);  }
+        tensor(const init_tensor_ND list): init_tensor<T>(list) { this->setup_device_memory(true);  }
         
         tensor(as_shape_t, const std::vector<size_t>& shape): init_tensor<T>(as_shape, shape) { 
             this->setup_device_memory(true); 
         }
         
-        tensor(const tensor &obj): init_tensor<T>(obj), device{obj.device}, transposed{obj.transposed} {}
-        tensor(tensor&& obj) noexcept: init_tensor<T>(obj), device{std::move(device)}, transposed{obj.transposed} {}
+        tensor(const tensor &obj)
+        :init_tensor<T>(obj), transposed{obj.transposed}, host_dirty{obj.host_dirty} {
+            if (this->host_dirty) return;
+            this->device = obj.device;
+        }
+        
+        tensor(tensor&& obj) noexcept
+        :init_tensor<T>(obj), device{std::move(device)}, transposed{obj.transposed}, host_dirty{obj.host_dirty} {}
         
         tensor &operator=(const tensor &obj) {
             if (this == &obj)
@@ -88,6 +107,7 @@ class tensor: public init_tensor<T> {
             init_tensor<T>::operator=(obj);
             this->device = std::move(obj.device);
             this->transposed = obj.transposed;
+            this->host_dirty = obj.host_dirty;
             
             return *this;
         }
@@ -116,12 +136,22 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        using init_tensor<T>::operator();
+        template<typename... Indices>
+        [[nodiscard]] T& operator()(Indices... indices) {
+            this->host_dirty = true;
+            return init_tensor<T>::operator()(indices...);
+        }
+
+        template<typename... Indices>
+        [[nodiscard]] const T& operator()(Indices... indices) const {
+            return init_tensor<T>::operator()(indices...);
+        }
 
         tensor<T>& resize(const std::vector<size_t>& shape) {
             init_tensor<T>::resize(shape);
             this->realloc_device_memory(true);
             this->transposed = false;
+
             return *this;
         }
 
@@ -135,6 +165,7 @@ class tensor: public init_tensor<T> {
         */
         inline bool operator==(const tensor &obj) const noexcept { return this->shape == obj.shape && this->n == obj.n; }
         inline bool operator!=(const tensor &obj) const noexcept { return this->shape != obj.shape || this->n != obj.n; }
+        
         tensor<T> operator+(tensor<T> &obj) const { return tensor<T>::add(*this, obj); }
         tensor<T>& operator+=(const tensor<T> &obj) { return this->add(obj); }
         
@@ -157,6 +188,7 @@ class tensor: public init_tensor<T> {
             tensor<T> result = *this;
 
             if (result.n > OFFSET_TO_GPU) {
+                this->sync_device();
                 dim3 blockSize(256);
                 dim3 grid_size((result.n * blockSize.x - 1) / blockSize.x);
                 kernel::scalar_dist<<<grid_size, blockSize>>>(result.device.d_var(), scalar);
@@ -168,6 +200,7 @@ class tensor: public init_tensor<T> {
                     result.data[i] *= scalar;
 
                 result.device.copy_from(result.data.get(), cudaMemcpyHostToDevice);
+                this->host_dirty = false;
             }
 
             return result;
@@ -176,7 +209,7 @@ class tensor: public init_tensor<T> {
         tensor<T>& operator*=(const tensor<T> &obj) { 
             if (!tensor<T>::memory_check(*this, obj))
                 throw std::runtime_error{"tensor::operator*=: cannot do arithmetic with uninitialized tensor(s)"};
-
+            
             switch(obj.dim()) {
                 case 0: return tensor<T>::operator*=(*obj.data.get());
                 case 1: return tensor<T>::dot(obj);
@@ -190,6 +223,7 @@ class tensor: public init_tensor<T> {
                 throw std::runtime_error{"tensor::operator*=: cannot do arithmetic with uninitialized tensor"};
             
             if (this->n > OFFSET_TO_GPU) {
+                this->sync_device();
                 dim3 block_size(256);
                 dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
                 kernel::scalar_dist<<<grid_size, block_size>>>(this->device.d_var(), scalar);
@@ -200,7 +234,7 @@ class tensor: public init_tensor<T> {
                 for(size_t i = 0; i < this->n; i++)
                     this->data[i] *= scalar;
 
-                this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
+                this->sync_device();
             }
 
             return *this;
@@ -209,18 +243,21 @@ class tensor: public init_tensor<T> {
         tensor& assign(const init_tensor_0D& scalar) {
             init_tensor<T>::assign(scalar);
             this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
+            this->host_dirty = false;
             return *this;
         }
 
         tensor& assign(const init_tensor_1D list) {
             init_tensor<T>::assign(list);
             this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
+            this->host_dirty = false;
             return *this;
         }  
 
         tensor& assign(const init_tensor_ND list) {
             init_tensor<T>::assign(list);
             this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
+            this->host_dirty = false;
             return *this;
         }
 
@@ -232,9 +269,6 @@ class tensor: public init_tensor<T> {
         static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&& b) = delete;
 
         static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&  b) {
-            if (!memory_check(a, b)) 
-                throw std::invalid_argument{"tensor::broadcast_order"};
-
             const std::vector<size_t>& s_a = a.shape;
             const std::vector<size_t>& s_b = b.shape;
         
@@ -260,6 +294,8 @@ class tensor: public init_tensor<T> {
             if (!tensor<T>::memory_check(*this, t)) 
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
 
+            tensor<T>::sync_device(*this, t);
+
             auto broadcast_check = tensor<T>::broadcast_order(*this, t);
             if (*this != t && !broadcast_check.has_value())
                 throw std::invalid_argument{"tensor::add: incompaitable shape or size"};
@@ -279,11 +315,12 @@ class tensor: public init_tensor<T> {
         static tensor<T> add(const tensor<T>& a, const tensor<T>& b) {
             if (!tensor<T>::memory_check(a, b)) 
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
-
+            
             auto broadcast_check = tensor<T>::broadcast_order(a, b);
             if (a != b && !broadcast_check.has_value())
                 throw std::invalid_argument("tensor::add: incompaitable shape or size"); 
-
+        
+            tensor<T>::sync_device(a, b);
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
             int block_size = 256;
@@ -313,6 +350,7 @@ class tensor: public init_tensor<T> {
             if (!((tensors == first) && ...))
                 throw std::invalid_argument("tensor::add: incompaitable shape or size");
 
+            tensor<T>::sync_device(tensors...);
             tensor<T> result(as_shape, tensor_shape);
                 
             std::vector<kernel::d_variables<T>> devices = {tensors.device.d_var()...};
@@ -342,9 +380,10 @@ class tensor: public init_tensor<T> {
                 throw std::invalid_argument{"tensor::matmul: given tensor(s) are not matrices"};
 
             if (this->shape[1] != t.shape[0]) throw std::invalid_argument{"tensor::matmul: invalid shapes"};  
-            
+        
             size_t i = this->shape[0], j = t.shape[1], k = this->shape[1]; 
             tensor<T> temp = *this;
+            tensor<T>::sync_device(temp, t);
 
             this->resize({i, j});
             
@@ -366,6 +405,7 @@ class tensor: public init_tensor<T> {
             
             if (a.shape[1] != b.shape[0]) throw std::invalid_argument{"tensor::matmul: invalid shapes"};
             
+            tensor<T>::sync_device(a, b);
             size_t i = a.shape[0], j = b.shape[1], k = a.shape[1]; 
             tensor<T> result(as_shape, {i, j});
             
@@ -389,6 +429,7 @@ class tensor: public init_tensor<T> {
                 throw std::invalid_argument{"tensor::dot: cannot perform dot operation with unmatched sizes"};
 
             tensor<T> temp = *this;
+            tensor<T>::sync_device(temp, t);
             this->resize({});
 
             dim3 block_size(256);
@@ -410,6 +451,7 @@ class tensor: public init_tensor<T> {
             if (a.n != b.n) 
                 throw std::invalid_argument{"tensor::dot: cannot perform dot operation with unmatched sizes"};
             
+            tensor<T>::sync_device(a, b);
             tensor<T> result(0);
             size_t N = a.n;
 
@@ -515,7 +557,7 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        ~tensor(void) override { this->transposed = false; }
+        ~tensor(void) override { this->transposed = this->host_dirty = false; }
 };
 
 template<arithmetic S, arithmetic T>

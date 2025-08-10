@@ -1,15 +1,15 @@
 #pragma once
 
 #include<initializer_list>
-#include<memory>
 #include<type_traits>
-#include<iostream>
 #include<algorithm>
 #include<stdexcept>
-#include<sstream>
 #include<concepts>
+#include<iostream>
+#include<sstream>
 #include<cstddef>
 #include<cstring>
+#include<memory>
 #include<vector>
 
 struct as_shape_t {};
