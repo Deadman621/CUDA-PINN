@@ -157,7 +157,6 @@ class init_tensor {
             this->x = new T[this->n];
             std::copy(obj.x, obj.x + obj.n, this->x);
 
-            
             return *this;
         }
 
@@ -171,7 +170,6 @@ class init_tensor {
             
             obj.x = nullptr;
             obj.n = 0;
-
 
             return *this;
         }
@@ -292,8 +290,10 @@ class init_tensor {
                     n *= i;
             }
 
-            if (this->n != 0) this->x = new T[this->n];
-            std::memset(this->x, 0, this->n);
+            if (this->n != 0) {
+                this->x = new T[this->n];
+                std::memset(this->x, 0, this->n);
+            }
 
             return *this;        
         }
