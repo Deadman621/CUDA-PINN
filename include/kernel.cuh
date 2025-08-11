@@ -1,9 +1,12 @@
 #pragma once
 
 #include<stdexcept>
+#include<device_math.h>
+
 namespace kernel {
-    
-    template<typename T>
+
+    using device_math::device_arithmetic;
+    template<device_arithmetic T>
     struct d_variables {
         T* data = nullptr;
         size_t* shape = nullptr;
@@ -51,7 +54,7 @@ namespace kernel {
         } 
     };
 
-    template<typename T>
+    template<device_arithmetic T>
     class device: public d_variables<T> {
         
         private:
@@ -354,7 +357,7 @@ namespace kernel {
 
     // Use obj.x[index] if you're sure that obj is not transposed
 
-    template<typename T>
+    template<device_arithmetic T>
     __global__ void add(const d_variables<T> a, const d_variables<T> b, d_variables<T> out) {
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= out.n) 
@@ -363,7 +366,7 @@ namespace kernel {
         out[i] = a[i % a.n] + b[i % b.n];
     }
 
-    template<typename T>
+    template<device_arithmetic T>
     __global__ void add_multiple(const d_variables<T> *A, d_variables<T> out, size_t count) {
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= out.n)
@@ -376,7 +379,34 @@ namespace kernel {
         out.data[i] = sum;
     }
 
-    template<typename T>
+    template<device_arithmetic T>
+    __global__ void sub(const d_variables<T> a, const d_variables<T> b, d_variables<T> out) {
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= out.n) 
+            return;
+
+        out[i] = a[i % a.n] - b[i % b.n];
+    }
+
+    template<device_arithmetic T>
+    __global__ void mul(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= A.n)
+            return;
+        
+        R[i] = A[i % A.n] * B[i % B.n];
+    }
+
+    template<device_arithmetic T>
+    __global__ void div(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
+        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+        if (i >= A.n)
+            return;
+        
+        R[i] = A[i % A.n] / B[i % B.n];
+    }
+
+    template<device_arithmetic T>
     __global__ void matmul(const d_variables<T> A, const d_variables<T> B, d_variables<T> R, size_t I, size_t J, size_t K) {
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         const size_t j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -390,7 +420,7 @@ namespace kernel {
         R[(i * J) + j] = sum;
     }
 
-    template<typename T>
+    template<device_arithmetic T>
     __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
         if (i >= A.n)
@@ -398,13 +428,5 @@ namespace kernel {
         
         T result = A[i] * B[i];
         atomicAdd(R.data, result);
-    }
-
-    template<typename T>
-    __global__ void scalar_dist(d_variables<T> t, T s) {
-        const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= t.n) return;
-
-        t.data[i] *= s;
     }
 }

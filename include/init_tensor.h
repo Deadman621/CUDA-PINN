@@ -1,10 +1,10 @@
 #pragma once
 
 #include<initializer_list>
+#include<device_math.h>
 #include<type_traits>
 #include<algorithm>
 #include<stdexcept>
-#include<concepts>
 #include<iostream>
 #include<sstream>
 #include<cstddef>
@@ -35,13 +35,7 @@ static std::string vec_to_str(const std::vector<T>& v) {
     return oss.str();
 }
 
-template<typename T>
-concept arithmetic = requires(T a, T b) {
-    { a + b } -> std::same_as<T>;
-    { a - b } -> std::same_as<T>;
-    { a * b } -> std::same_as<T>;
-    { a / b } -> std::same_as<T>;
-};
+using device_math::arithmetic;
 
 template<arithmetic T>
 class init_tensor {
@@ -87,6 +81,7 @@ class init_tensor {
         explicit init_tensor(const init_tensor_0D& scalar): n{1}, data(std::make_unique<T[]>(1)) {
             this->shape.resize(0);
             this->stride.resize(0);
+            this->data[0] = scalar;
         }
 
         init_tensor(as_shape_t, const std::vector<size_t>& shape): shape{shape} {
