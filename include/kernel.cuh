@@ -315,7 +315,7 @@ namespace kernel {
                 this->n = obj.n;
                 this->dim = obj.dim;
                 this->transposed = obj.transposed;
-                this->allocate(this->n, this->dim).copy(obj.data, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
+                this->allocate(this->n, this->dim).copy_from(obj.data, obj.shape, obj.stride, cudaMemcpyDeviceToDevice);
 
                 return *this;
             }

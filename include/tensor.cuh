@@ -20,10 +20,6 @@ static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __a
 
 template<arithmetic T>
 class tensor: public init_tensor<T> {
-
-    template<arithmetic S, arithmetic U>
-    friend tensor<U> operator*(const S& scalar, const tensor<U>& obj);
-
     private:
         mutable kernel::device<T> device;
         mutable bool host_dirty = false;
@@ -257,7 +253,7 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(*this, t);
 
             dim3 block_size(256);
-            dim3 grid_size((this->n + block_size - 1) / block_size);
+            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
             kernel::add<<<grid_size, block_size>>>(
                 this->device.d_var(), 
@@ -282,7 +278,7 @@ class tensor: public init_tensor<T> {
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
             dim3 block_size(256);
-            dim3 grid_size((result.n + block_size - 1) / block_size);
+            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
             kernel::add<<<grid_size, block_size>>>(
                 a.device.d_var(), 
@@ -310,7 +306,7 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(*this, t);
             
             dim3 block_size(256);
-            dim3 grid_size((this->n + block_size - 1) / block_size);
+            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
             kernel::sub<<<grid_size, block_size>>>(
                 this->device.d_var(), 
@@ -335,7 +331,7 @@ class tensor: public init_tensor<T> {
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
             dim3 block_size(256);
-            dim3 grid_size((result.n + block_size - 1) / block_size);
+            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
             kernel::sub<<<grid_size, block_size>>>(
                 a.device.d_var(), 
@@ -702,12 +698,6 @@ class tensor: public init_tensor<T> {
 
         ~tensor(void) override { this->transposed = this->host_dirty = false; }
 };
-
-template<arithmetic S, arithmetic T>
-tensor<T> operator*(const S& scalar, const tensor<T>& obj) {
-    static_assert(std::is_arithmetic_v<S>, "tensor::operator*: non-arithmetic types not supported");
-    return obj.operator*(static_cast<T>(scalar));
-}
 
 template<arithmetic T>
 tensor<T> make_tensor(const typename tensor<T>::init_tensor_0D& scalar) { return tensor<T>(scalar); }
