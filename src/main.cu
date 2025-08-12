@@ -1,4 +1,4 @@
-#include "host/runtime.h"
+#include<host/runtime.h>
 #include<iostream>
 #include<tensor.cuh>
 
@@ -15,7 +15,7 @@ int main(void) {
         const auto result = tensor_d::div(a, b);
         cout << "result = " << result << endl;
     } catch (host_runtime::device_exception& e) {
-        e.what();
+        cout << e.what() << endl;
     }
 
     cout << endl;

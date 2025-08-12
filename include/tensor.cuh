@@ -1,12 +1,12 @@
 #pragma once
 
-#include "host/runtime.h"
 #include<cstdio>
 #include<utility>
 #include<compare>
 #include<cstddef>
 #include<optional>
 #include<unordered_set>
+#include<host/runtime.h>
 #include<device/kernel.cuh>
 #include<host/init_tensor.h>
 
@@ -457,7 +457,7 @@ class tensor: public init_tensor<T> {
                 result.device.d_var()
             );
 
-            host_runtime::find_error(__PRETTY_FUNCTION__);
+            host_runtime::find_error(__func__);
             result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;

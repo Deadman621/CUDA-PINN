@@ -12,7 +12,6 @@ set(CMAKE_BUILD_TYPE Debug)
 set(SOURCES
     src/main.cu
     src/network.cu
-    src/runtime.cu
     src/utils.cu
 )
 
