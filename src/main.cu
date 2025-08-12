@@ -1,3 +1,4 @@
+#include "host/runtime.h"
 #include<iostream>
 #include<tensor.cuh>
 
@@ -8,17 +9,14 @@ using tensor_d = tensor<double>;
 int main(void) {
     cout << endl;
 
-    tensor_d a = {{1, 2}, {3, 4}, {6, 7}}, b = {2, 2};
-
-    tensor_d add = a + b;
-    tensor_d sub = a - b;
-    tensor_d mul = a * b;
-    tensor_d div = a / b;
-
-    cout << "add = " << add << endl;
-    cout << "sub = " << sub << endl;
-    cout << "mul = " << mul << endl;
-    cout << "div = " << div << endl;
+    const tensor_d a = {1, 2, 3 ,4}, b = {0, 6, 7, 8};
+    
+    try {
+        const auto result = tensor_d::div(a, b);
+        cout << "result = " << result << endl;
+    } catch (host_runtime::device_exception& e) {
+        e.what();
+    }
 
     cout << endl;
     return 0;

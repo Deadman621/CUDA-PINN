@@ -1,11 +1,12 @@
 #pragma once
 
 #include<stdexcept>
-#include<device_math.h>
+#include<device/runtime.cuh>
+#include<device/constants.h>
 
 namespace kernel {
 
-    using device_math::device_arithmetic;
+    using device_constants::device_arithmetic;
     template<device_arithmetic T>
     struct d_variables {
         T* data = nullptr;
@@ -403,6 +404,12 @@ namespace kernel {
         if (i >= A.n)
             return;
         
+        T denominator = B[i % B.n];
+        if (denominator == 0) {
+            atomicExch(&device_runtime::error_code, device_constants::error::DIVISION_BY_ZERO);
+            return;
+        }
+
         R[i] = A[i % A.n] / B[i % B.n];
     }
 
@@ -422,11 +429,18 @@ namespace kernel {
 
     template<device_arithmetic T>
     __global__ void dot(const d_variables<T> A, const d_variables<T> B, d_variables<T> R) {
+        __shared__ T partial[device_constants::BLOCK_SIZE];
         const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-        if (i >= A.n)
+        partial[threadIdx.x] = (i < A.n)? A[i] * B[i]: 0;
+        if (i >= A.n) 
             return;
         
-        T result = A[i] * B[i];
-        atomicAdd(R.data, result);
+        __syncthreads();
+        if (threadIdx.x == 0) {
+            T sum = 0;
+            for(size_t j = 0; j < device_constants::BLOCK_SIZE; j++) 
+                sum += partial[j];
+            atomicAdd(R.data, sum);
+        }
     }
 }
