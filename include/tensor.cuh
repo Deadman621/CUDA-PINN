@@ -81,7 +81,7 @@ class tensor: public init_tensor<T> {
         }
         
         tensor(tensor&& obj) noexcept
-        :init_tensor<T>(obj), device{std::move(device)}, transposed{obj.transposed}, host_dirty{obj.host_dirty} {}
+        :init_tensor<T>(obj), device{std::move(obj.device)}, transposed{obj.transposed}, host_dirty{obj.host_dirty} {}
         
         tensor &operator=(const tensor &obj) {
             if (this == &obj)
