@@ -9,7 +9,7 @@ using tensor_d = tensor<double>;
 int main(void) {
     cout << endl;
 
-    const tensor_d a = {1, 2, 3 ,4}, b = {0, 6, 7, 8};
+    const tensor_d a = {1, 2, 3, 4}, b = {5, 6, 7, 8};
     
     const auto result = tensor_d::div(a, b);
     cout << "result = " << result << endl;

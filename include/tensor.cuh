@@ -42,15 +42,30 @@ class tensor: public init_tensor<T> {
         
         void setup_device_memory(bool shape) {
             this->device.allocate(this->n, this->dim());
-            if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
+            if (shape) {
+                this->device.copy_from(
+                        this->data.get(),
+                    this->shape.data(),
+                    this->stride.data(),
+                     cudaMemcpyHostToDevice
+                );
+            }
+
             else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             this->host_dirty = false;    
         }
 
         void realloc_device_memory(bool shape) {
             this->device.reallocate(this->n, this->dim());
-            if (shape) this->device.copy_from(this->data.get(), this->shape.data(), this->stride.data(), cudaMemcpyHostToDevice);
-            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);         
+            if (shape) {
+                this->device.copy_from(
+                        this->data.get(),
+                    this->shape.data(),
+                    this->stride.data(),
+                    cudaMemcpyHostToDevice
+                );
+            }
+            else this->device.copy_from(this->data.get(), cudaMemcpyHostToDevice);
             this->host_dirty = false;
         }
 
@@ -62,20 +77,22 @@ class tensor: public init_tensor<T> {
         }
         
         template<typename... Tensors>
-        static size_t sync_device(const Tensors &...tensors) { return (static_cast<size_t>(tensors.sync_device()) + ...); } 
+        static size_t sync_device(const Tensors &...tensors) {
+            return (static_cast<size_t>(tensors.sync_device()) + ...);
+        }
 
         template<auto cuda_kernel>
-        static tensor<T> elementwise_out(const char* opname, const tensor<T>& a, const tensor<T>& b) {
+        static tensor elementwise_out(const char* opname, const tensor& a, const tensor& b) {
             const std::string qualified_name = std::string("tensor::") + opname + ": ";
-            if (!tensor<T>::memory_check(a, b)) 
+            if (!tensor::memory_check(a, b))
                 throw std::invalid_argument{qualified_name + "cannot do arithmetic with uninitialized tensor(s)"};
             
-            auto broadcast_check = tensor<T>::broadcast_order(a, b);
+            auto broadcast_check = tensor::broadcast_order(a, b);
             if (!broadcast_check.has_value()) 
-                throw std::invalid_argument{qualified_name + ": incompaitable shape or size"}; 
-            
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(as_shape, broadcast_check.value().first->shape);
+                throw std::invalid_argument{qualified_name + ": incompatible shape or size"};
+
+            tensor::sync_device(a, b);
+            tensor result(as_shape, broadcast_check.value().first->shape);
             
             dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
@@ -93,19 +110,19 @@ class tensor: public init_tensor<T> {
         }
 
         template<auto cuda_kernel> 
-        tensor<T>& elementwise_inplace(const char* opname, const tensor<T>& t) {
+        tensor& elementwise_inplace(const char* opname, const tensor& t) {
             const std::string qualified_name = std::string("tensor::") + opname + ": ";
-            if (!tensor<T>::memory_check(*this, t)) 
+            if (!tensor::memory_check(*this, t))
                 throw std::invalid_argument{qualified_name + "cannot do arithmetic with uninitialized tensor(s)"};
             
-            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
+            auto broadcast_check = tensor::broadcast_order(*this, t);
             if (!broadcast_check.has_value()) 
                 throw std::invalid_argument{qualified_name + "incompaitable shape or size"}; 
     
-            else if (broadcast_check.value().first != this) 
+            if (broadcast_check.value().first != this)
                 throw std::invalid_argument{qualified_name + "cannot broadcast this (object)"};
 
-            tensor<T>::sync_device(*this, t);
+            tensor::sync_device(*this, t);
             
             dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
@@ -116,7 +133,7 @@ class tensor: public init_tensor<T> {
                 this->device.d_var()
             );
 
-            if(std::string(opname) == "div") device::runtime::find_error(qualified_name);
+            if (std::string(opname) == "div") device::runtime::find_error(qualified_name);
             this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
 
             return *this;            
@@ -124,7 +141,7 @@ class tensor: public init_tensor<T> {
 
     public:
         tensor(void) = default;
-        
+
         tensor(const init_tensor_0D sclr): init_tensor<T>(sclr) { this->setup_device_memory(false); }
         tensor(const init_tensor_1D list): init_tensor<T>(list) { this->setup_device_memory(true);  }
         tensor(const init_tensor_ND list): init_tensor<T>(list) { this->setup_device_memory(true);  }
@@ -211,29 +228,29 @@ class tensor: public init_tensor<T> {
         
         inline bool operator!(void) const noexcept { return !this->mem_avail(); }
         
-        inline tensor<T> operator+(const tensor<T> &obj) const { return tensor<T>::add(*this, obj); }
-        inline tensor<T> operator-(const tensor<T> &obj) const { return tensor<T>::sub(*this, obj); }
-        inline tensor<T> operator*(const tensor<T> &obj) const { return tensor<T>::mul(*this, obj); }
-        inline tensor<T> operator/(const tensor<T> &obj) const { return tensor<T>::div(*this, obj); }
+        inline tensor operator+(const tensor &obj) const { return tensor::add(*this, obj); }
+        inline tensor operator-(const tensor &obj) const { return tensor::sub(*this, obj); }
+        inline tensor operator*(const tensor &obj) const { return tensor::mul(*this, obj); }
+        inline tensor operator/(const tensor &obj) const { return tensor::div(*this, obj); }
 
-        inline tensor<T>& operator+=(const tensor<T> &obj) { return this->add(obj); }
-        inline tensor<T>& operator-=(const tensor<T> &obj) { return this->sub(obj); }
-        inline tensor<T>& operator*=(const tensor<T> &obj) { return this->mul(obj); }
-        inline tensor<T>& operator/=(const tensor<T> &obj) { return this->div(obj); }
+        inline tensor& operator+=(const tensor &obj) { return this->add(obj); }
+        inline tensor& operator-=(const tensor &obj) { return this->sub(obj); }
+        inline tensor& operator*=(const tensor &obj) { return this->mul(obj); }
+        inline tensor& operator/=(const tensor &obj) { return this->div(obj); }
 
-        inline tensor<T>& operator++(void) { return this->add(tensor<T>(1)); }
-        inline tensor<T>& operator--(void) { return this->sub(tensor<T>(1)); }
+        inline tensor& operator++(void) { return this->add(tensor(1)); }
+        inline tensor& operator--(void) { return this->sub(tensor(1)); }
 
         // not worth it
-        inline tensor<T> operator++(int) = delete;
-        inline tensor<T> operator--(int) = delete;
+        inline tensor operator++(int) = delete;
+        inline tensor operator--(int) = delete;
         
-        using const_ptr = const tensor<T>*;
+        using const_ptr = const tensor*;
         using op_tensor = std::optional<std::pair<const_ptr, const_ptr>>;
 
-        static op_tensor broadcast_order(const tensor<T>&& a, const tensor<T>&& b) = delete;
-        static op_tensor broadcast_order(const tensor<T>&& a, const tensor<T>&  b) = delete;
-        static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&& b) = delete;
+        static op_tensor broadcast_order(const tensor&& a, const tensor&& b) = delete;
+        static op_tensor broadcast_order(const tensor&& a, const tensor&  b) = delete;
+        static op_tensor broadcast_order(const tensor&  a, const tensor&& b) = delete;
 
         using init_tensor<T>::at;
 
@@ -243,7 +260,7 @@ class tensor: public init_tensor<T> {
             return init_tensor<T>::at(indices...);
         }
 
-        tensor<T>& resize(const shape_t& shape) {
+        tensor& resize(const shape_t& shape) {
             init_tensor<T>::resize(shape);
             this->realloc_device_memory(true);
             this->transposed = false;
@@ -272,7 +289,7 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        static op_tensor broadcast_order(const tensor<T>& a, const tensor<T>& b) {
+        static op_tensor broadcast_order(const tensor& a, const tensor& b) {
             if (a == b) return std::make_pair(&a, &b);
             const shape_t& s_a = a.shape;
             const shape_t& s_b = b.shape;
@@ -295,40 +312,40 @@ class tensor: public init_tensor<T> {
             else return std::make_pair(&a, &b);
         }
 
-        tensor<T>& add(const tensor<T>& t) { 
+        tensor& add(const tensor& t) {
             return this->elementwise_inplace<&device::kernel::add<T>>("add", t); 
         }
 
-        tensor<T>& sub(const tensor<T>& t) { 
+        tensor& sub(const tensor& t) {
             return this->elementwise_inplace<device::kernel::sub<T>>("sub", t); 
         }
 
-        tensor<T>& mul(const tensor<T>& t) { 
+        tensor& mul(const tensor& t) {
             return this->elementwise_inplace<device::kernel::mul<T>>("mul", t); 
         }
 
-        tensor<T>& div(const tensor<T>& t) { 
+        tensor& div(const tensor& t) {
             return this->elementwise_inplace<device::kernel::div<T>>("div", t); 
         }
 
-        static tensor<T> add(const tensor<T>& a, const tensor<T>& b) {
-            return tensor<T>::elementwise_out<device::kernel::add<T>>("add", a, b);
+        static tensor add(const tensor& a, const tensor& b) {
+            return tensor::elementwise_out<device::kernel::add<T>>("add", a, b);
         }
 
-        static tensor<T> sub(const tensor<T>& a, const tensor<T>& b) {
-            return tensor<T>::elementwise_out<device::kernel::sub<T>>("sub", a, b);
+        static tensor sub(const tensor& a, const tensor& b) {
+            return tensor::elementwise_out<device::kernel::sub<T>>("sub", a, b);
         } 
         
-        static tensor<T> mul(const tensor<T>& a, const tensor<T>& b) {
-            return tensor<T>::elementwise_out<device::kernel::mul<T>>("mul", a, b);
+        static tensor mul(const tensor& a, const tensor& b) {
+            return tensor::elementwise_out<device::kernel::mul<T>>("mul", a, b);
         }
 
-        static tensor<T> div(const tensor<T>& a, const tensor<T>& b) {
-            return tensor<T>::elementwise_out<device::kernel::div<T>>("div", a, b);
+        static tensor div(const tensor& a, const tensor& b) {
+            return tensor::elementwise_out<device::kernel::div<T>>("div", a, b);
         }
 
-        tensor<T>& matmul(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t)) 
+        tensor& matmul(const tensor& t) {
+            if (!tensor::memory_check(*this, t))
                 throw std::invalid_argument{"tensor::matmul: cannot multiply uninitialized tensors"};        
                 
             if (this->dim() != 2 || t.dim() != 2) 
@@ -337,8 +354,8 @@ class tensor: public init_tensor<T> {
             if (this->shape[1] != t.shape[0]) throw std::invalid_argument{"tensor::matmul: invalid shapes"};  
         
             size_t i = this->shape[0], j = t.shape[1], k = this->shape[1]; 
-            tensor<T> temp = *this;
-            tensor<T>::sync_device(temp, t);
+            tensor temp = *this;
+            tensor::sync_device(temp, t);
 
             this->resize({i, j});
             
@@ -360,8 +377,8 @@ class tensor: public init_tensor<T> {
             return *this;            
         }
 
-        static tensor<T> matmul(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b)) 
+        static tensor matmul(const tensor& a, const tensor& b) {
+            if (!tensor::memory_check(a, b))
                 throw std::invalid_argument{"tensor::matmul: cannot multiply uninitialized tensors"};
             
             if (a.dim() != 2 || b.dim() != 2) 
@@ -369,9 +386,9 @@ class tensor: public init_tensor<T> {
             
             if (a.shape[1] != b.shape[0]) throw std::invalid_argument{"tensor::matmul: invalid shapes"};
             
-            tensor<T>::sync_device(a, b);
+            tensor::sync_device(a, b);
             size_t i = a.shape[0], j = b.shape[1], k = a.shape[1]; 
-            tensor<T> result(as_shape, {i, j});
+            tensor result(as_shape, {i, j});
             
             dim3 block(16, 16);
             dim3 grid_size(
@@ -391,8 +408,8 @@ class tensor: public init_tensor<T> {
             return result;
         }
 
-        tensor& dot(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t))
+        tensor& dot(const tensor& t) {
+            if (!tensor::memory_check(*this, t))
                 throw std::invalid_argument{"tensor::dot: cannot multiply uninitialized tensors"};
 
             if (this->dim() != 1 || t.dim() != 1)
@@ -401,8 +418,8 @@ class tensor: public init_tensor<T> {
             if (this->n != t.n)
                 throw std::invalid_argument{"tensor::dot: cannot perform dot operation with unmatched sizes"};
 
-            tensor<T> temp = *this;
-            tensor<T>::sync_device(temp, t);
+            tensor temp = *this;
+            tensor::sync_device(temp, t);
             this->resize({});
 
             dim3 block_size(device::constants::BLOCK_SIZE);
@@ -419,8 +436,8 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        static tensor<T> dot(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b)) 
+        static tensor dot(const tensor& a, const tensor& b) {
+            if (!tensor::memory_check(a, b))
                 throw std::invalid_argument{"tensor::dot: cannot multiply uninitialized tensors"};
 
             if (a.dim() != 1 || b.dim() != 1) 
@@ -429,8 +446,8 @@ class tensor: public init_tensor<T> {
             if (a.n != b.n) 
                 throw std::invalid_argument{"tensor::dot: cannot perform dot operation with unmatched sizes"};
             
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(0);
+            tensor::sync_device(a, b);
+            tensor result(0);
             size_t N = a.n;
 
             dim3 block(device::constants::BLOCK_SIZE);
@@ -447,29 +464,29 @@ class tensor: public init_tensor<T> {
             return result;
         }
 
-        static tensor<T> einsum(const tensor<T>& a, const tensor<T>& b) {
+        static tensor einsum(const tensor& a, const tensor& b) {
             // Will do later...
         }
 
         template<typename... Tensors>
-        static tensor<T> add(const Tensors &...tensors) {
+        static tensor add(const Tensors &...tensors) {
             constexpr size_t count = sizeof...(tensors);
-            static_assert((std::is_same_v<tensor<T>, Tensors> && ...), "tensor::add: all arguments must be tensor<T>");            
+            static_assert((std::is_same_v<tensor, Tensors> && ...), "tensor::add: all arguments must be tensor");
             if constexpr (count == 0)
                 throw std::invalid_argument("tensor::add: need at least one tensor");
 
-            const tensor<T> &first = GetFirst(tensors...);
+            const tensor &first = GetFirst(tensors...);
             const shape_t &tensor_shape = first.shape;
             const auto tensor_size = static_cast<s_size_t>(first.n);
 
-            if (!tensor<T>::memory_check(tensors...))
+            if (!tensor::memory_check(tensors...))
                 throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
 
             if (!((tensors == first) && ...))
                 throw std::invalid_argument("tensor::add: incompaitable shape or size");
 
-            tensor<T>::sync_device(tensors...);  
-            tensor<T> result(as_shape, tensor_shape);
+            tensor::sync_device(tensors...);
+            tensor result(as_shape, tensor_shape);
                 
             std::vector<device::tensor::variables<T>> devices = {tensors.device.d_var()...};
 
@@ -490,8 +507,8 @@ class tensor: public init_tensor<T> {
             return result;
         }
 
-        static tensor<T> transpose(const tensor<T>& a, const std::initializer_list<size_t> order = {}) {
-            tensor<T> result = a;
+        static tensor transpose(const tensor& a, const std::initializer_list<size_t> order = {}) {
+            tensor result = a;
             size_t size = order.size();
             shape_t& shape = result.shape;
             shape_t& stride = result.stride;
@@ -530,7 +547,7 @@ class tensor: public init_tensor<T> {
             return result;
         }
         
-        tensor<T>& transpose(const std::initializer_list<size_t> order = {}) {
+        tensor& transpose(const std::initializer_list<size_t> order = {}) {
 
             size_t size = order.size();
             
@@ -555,7 +572,8 @@ class tensor: public init_tensor<T> {
                 size_t k = 0;
                 for(const auto& i: order) {
                     if (i >= this->dim()) throw std::invalid_argument{"tensor::transpose: invalid order"};
-                    if (!set.insert(i).second) throw std::invalid_argument{"tensor::transpose: duplicates not allowed"};
+                    if (!set.insert(i).second)
+                        throw std::invalid_argument{"tensor::transpose: duplicates not allowed"};
                     
                     new_shape[k] = this->shape[i];
                     new_stride[k] = this->stride[i];

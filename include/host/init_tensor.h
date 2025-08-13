@@ -133,7 +133,8 @@ class init_tensor {
 
                 T* alias = this->data.get();
                 for(const init_tensor<T>& i: list) {
-                    if (i.shape != first.shape) throw std::invalid_argument{"init_tensor::init_tensor: inconistent shape"};                
+                    if (i.shape != first.shape)
+                        throw std::invalid_argument{"init_tensor::init_tensor: inconsistent shape"};
                     alias = std::copy(i.data.get(), i.data.get() + i.n, alias);
                 } 
             }
