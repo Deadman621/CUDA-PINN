@@ -10,34 +10,21 @@ namespace device {
         using constants::device_arithmetic;
 
         template<device_arithmetic T>
-        __global__ void add(const tensor::variables<T> a, const tensor::variables<T> b, tensor::variables<T> out) {
+        __global__ void add(const tensor::variables<T> A, const tensor::variables<T> B, tensor::variables<T> R) {
             const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= out.n) 
+            if (i >= R.n) 
                 return;
 
-            out[i] = a[i % a.n] + b[i % b.n];
+            R[i] = A[i % A.n] + B[i % B.n];
         }
 
         template<device_arithmetic T>
-        __global__ void add_multiple(const tensor::variables<T> *A, tensor::variables<T> out, size_t count) {
+        __global__ void sub(const tensor::variables<T> A, const tensor::variables<T> B, tensor::variables<T> R) {
             const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= out.n)
+            if (i >= R.n) 
                 return;
 
-            T sum = 0;
-            for (size_t j = 0; j < count; j++) 
-                sum += A[j][i];
-
-            out.data[i] = sum;
-        }
-
-        template<device_arithmetic T>
-        __global__ void sub(const tensor::variables<T> a, const tensor::variables<T> b, tensor::variables<T> out) {
-            const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
-            if (i >= out.n) 
-                return;
-
-            out[i] = a[i % a.n] - b[i % b.n];
+            R[i] = A[i % A.n] - B[i % B.n];
         }
 
         template<device_arithmetic T>
@@ -65,6 +52,22 @@ namespace device {
         }
 
         template<device_arithmetic T>
+        using elew_kernel_ptr_t = void (*)(const tensor::variables<T>, const tensor::variables<T>, tensor::variables<T>);
+
+        template<device_arithmetic T>
+        __global__ void add_multiple(const tensor::variables<T> *A, tensor::variables<T> R, size_t count) {
+            const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
+            if (i >= R.n)
+                return;
+
+            T sum = 0;
+            for (size_t j = 0; j < count; j++) 
+                sum += A[j][i];
+
+            R.data[i] = sum;
+        }
+
+        template<device_arithmetic T>
         __global__ void matmul(const tensor::variables<T> A, const tensor::variables<T> B, tensor::variables<T> R, size_t I, size_t J, size_t K) {
             const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
             const size_t j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -81,10 +84,9 @@ namespace device {
         template<device_arithmetic T>
         __global__ void dot(const tensor::variables<T> A, const tensor::variables<T> B, tensor::variables<T> R) {
             __shared__ T partial[constants::BLOCK_SIZE];
+
             const size_t i = blockIdx.x * blockDim.x + threadIdx.x;
             partial[threadIdx.x] = (i < A.n)? A[i] * B[i]: 0;
-            if (i >= A.n) 
-                return;
             
             __syncthreads();
             if (threadIdx.x == 0) {

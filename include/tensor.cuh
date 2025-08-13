@@ -19,6 +19,7 @@ class tensor: public init_tensor<T> {
     private:
         mutable device::tensor::interface<T> device;
         mutable bool host_dirty = false;
+        mutable bool device_dirty = false;
         bool transposed = false;
 
         using typename init_tensor<T>::data_t;
@@ -62,7 +63,65 @@ class tensor: public init_tensor<T> {
         
         template<typename... Tensors>
         static size_t sync_device(const Tensors &...tensors) { return (static_cast<size_t>(tensors.sync_device()) + ...); } 
-        
+
+        template<auto cuda_kernel>
+        static tensor<T> elementwise_out(const char* opname, const tensor<T>& a, const tensor<T>& b) {
+            const std::string qualified_name = std::string("tensor::") + opname + ": ";
+            if (!tensor<T>::memory_check(a, b)) 
+                throw std::invalid_argument{qualified_name + "cannot do arithmetic with uninitialized tensor(s)"};
+            
+            auto broadcast_check = tensor<T>::broadcast_order(a, b);
+            if (!broadcast_check.has_value()) 
+                throw std::invalid_argument{qualified_name + ": incompaitable shape or size"}; 
+            
+            tensor<T>::sync_device(a, b);
+            tensor<T> result(as_shape, broadcast_check.value().first->shape);
+            
+            dim3 block_size(device::constants::BLOCK_SIZE);
+            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
+
+            cuda_kernel<<<grid_size, block_size>>>(
+                a.device.d_var(), 
+                b.device.d_var(), 
+                result.device.d_var()
+            );
+
+            if(std::string(opname) == "div") device::runtime::find_error(qualified_name);
+            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
+
+            return result;            
+        }
+
+        template<auto cuda_kernel> 
+        tensor<T>& elementwise_inplace(const char* opname, const tensor<T>& t) {
+            const std::string qualified_name = std::string("tensor::") + opname + ": ";
+            if (!tensor<T>::memory_check(*this, t)) 
+                throw std::invalid_argument{qualified_name + "cannot do arithmetic with uninitialized tensor(s)"};
+            
+            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
+            if (!broadcast_check.has_value()) 
+                throw std::invalid_argument{qualified_name + "incompaitable shape or size"}; 
+    
+            else if (broadcast_check.value().first != this) 
+                throw std::invalid_argument{qualified_name + "cannot broadcast this (object)"};
+
+            tensor<T>::sync_device(*this, t);
+            
+            dim3 block_size(device::constants::BLOCK_SIZE);
+            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
+
+            cuda_kernel<<<grid_size, block_size>>>(
+                this->device.d_var(), 
+                t.device.d_var(), 
+                this->device.d_var()
+            );
+
+            if(std::string(opname) == "div") device::runtime::find_error(qualified_name);
+            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
+
+            return *this;            
+        }
+
     public:
         tensor(void) = default;
         
@@ -165,6 +224,7 @@ class tensor: public init_tensor<T> {
         inline tensor<T>& operator++(void) { return this->add(tensor<T>(1)); }
         inline tensor<T>& operator--(void) { return this->sub(tensor<T>(1)); }
 
+        // not worth it
         inline tensor<T> operator++(int) = delete;
         inline tensor<T> operator--(int) = delete;
         
@@ -212,7 +272,7 @@ class tensor: public init_tensor<T> {
             return *this;
         }
 
-        static op_tensor broadcast_order(const tensor<T>&  a, const tensor<T>&  b) {
+        static op_tensor broadcast_order(const tensor<T>& a, const tensor<T>& b) {
             if (a == b) return std::make_pair(&a, &b);
             const shape_t& s_a = a.shape;
             const shape_t& s_b = b.shape;
@@ -235,218 +295,36 @@ class tensor: public init_tensor<T> {
             else return std::make_pair(&a, &b);
         }
 
-        tensor<T>& add(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t)) 
-                throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
-            
-            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
+        tensor<T>& add(const tensor<T>& t) { 
+            return this->elementwise_inplace<&device::kernel::add<T>>("add", t); 
+        }
 
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument{"tensor::add: incompaitable shape or size"};
-        
-            else if (broadcast_check.value().first != this) 
-                throw std::invalid_argument{"tensor::add: cannot broadcast this (object)"};
-        
-            tensor<T>::sync_device(*this, t);
+        tensor<T>& sub(const tensor<T>& t) { 
+            return this->elementwise_inplace<device::kernel::sub<T>>("sub", t); 
+        }
 
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
+        tensor<T>& mul(const tensor<T>& t) { 
+            return this->elementwise_inplace<device::kernel::mul<T>>("mul", t); 
+        }
 
-            device::kernel::add<<<grid_size, block_size>>>(
-                this->device.d_var(), 
-                t.device.d_var(), 
-                this->device.d_var()
-            );
-
-            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
-
-            return *this;
-        }   
+        tensor<T>& div(const tensor<T>& t) { 
+            return this->elementwise_inplace<device::kernel::div<T>>("div", t); 
+        }
 
         static tensor<T> add(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b)) 
-                throw std::invalid_argument{"tensor::add: cannot do arithmetic with uninitialized tensor(s)"};
-            
-            auto broadcast_check = tensor<T>::broadcast_order(a, b);
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::add: incompaitable shape or size"); 
-        
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(as_shape, broadcast_check.value().first->shape);
-            
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
-
-            device::kernel::add<<<grid_size, block_size>>>(
-                a.device.d_var(), 
-                b.device.d_var(), 
-                result.device.d_var()
-            );
-
-            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
-
-            return result;
+            return tensor<T>::elementwise_out<device::kernel::add<T>>("add", a, b);
         }
-
-        tensor<T>& sub(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t)) 
-                throw std::invalid_argument{"tensor::sub: cannot do arithmetic with uninitialized tensor(s)"};
-            
-            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
-
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument{"tensor::sub: incompaitable shape or size"};
-    
-            else if (broadcast_check.value().first != this) 
-                throw std::invalid_argument{"tensor::sub: cannot broadcast this (object)"};
-        
-            tensor<T>::sync_device(*this, t);
-            
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
-
-            device::kernel::sub<<<grid_size, block_size>>>(
-                this->device.d_var(), 
-                t.device.d_var(), 
-                this->device.d_var()
-            );
-
-            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
-
-            return *this;
-        }   
 
         static tensor<T> sub(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b)) 
-                throw std::invalid_argument{"tensor::sub: cannot do arithmetic with uninitialized tensor(s)"};
-            
-            auto broadcast_check = tensor<T>::broadcast_order(a, b);
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::sub: incompaitable shape or size"); 
+            return tensor<T>::elementwise_out<device::kernel::sub<T>>("sub", a, b);
+        } 
         
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(as_shape, broadcast_check.value().first->shape);
-            
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
-
-            device::kernel::sub<<<grid_size, block_size>>>(
-                a.device.d_var(), 
-                b.device.d_var(), 
-                result.device.d_var()
-            );
-
-            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
-
-            return result;
-        }        
-
-        tensor<T>& mul(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t))
-                throw std::runtime_error{"tensor::mul: cannot do arithmetic with uninitialized tensor(s)"};
-
-            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
-
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::mul: shape not suitable for elementwise multiplication"); 
-
-            else if (broadcast_check.value().first != this)
-                throw std::invalid_argument("tensor::mul: cannot broadcast this (object)"); 
-        
-            tensor<T>::sync_device(*this, t);
-
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
-
-            device::kernel::mul<<<grid_size, block_size>>>(
-                this->device.d_var(), 
-                t.device.d_var(), 
-                this->device.d_var()
-            );
-
-            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
-
-            return *this;   
-        }
-
         static tensor<T> mul(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b))
-                throw std::runtime_error{"tensor::mul: cannot do arithmetic with uninitialized tensor(s)"};
-
-            auto broadcast_check = tensor<T>::broadcast_order(a, b);
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::mul: shape not suitable for elementwise multiplication"); 
-        
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(as_shape, broadcast_check.value().first->shape);
-
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
-
-            device::kernel::mul<<<grid_size, block_size>>>(
-                a.device.d_var(), 
-                b.device.d_var(), 
-                result.device.d_var()
-            );
-
-            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
-
-            return result;
-        }
-
-        tensor<T>& div(const tensor<T>& t) {
-            if (!tensor<T>::memory_check(*this, t))
-                throw std::runtime_error{"tensor::div: cannot do arithmetic with uninitialized tensor(s)"};
-
-            auto broadcast_check = tensor<T>::broadcast_order(*this, t);
-
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::div: shape not suitable for elementwise divison"); 
-
-            else if (broadcast_check.value().first != this)
-                throw std::invalid_argument("tensor::div: cannot broadcast this (object)"); 
-        
-            tensor<T>::sync_device(*this, t);
-
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
-
-            device::kernel::div<<<grid_size, block_size>>>(
-                this->device.d_var(), 
-                t.device.d_var(), 
-                this->device.d_var()
-            );
-
-            device::runtime::find_error(__PRETTY_FUNCTION__);
-            this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
-
-            return *this;   
+            return tensor<T>::elementwise_out<device::kernel::mul<T>>("mul", a, b);
         }
 
         static tensor<T> div(const tensor<T>& a, const tensor<T>& b) {
-            if (!tensor<T>::memory_check(a, b))
-                throw std::runtime_error{"tensor::div: cannot do arithmetic with uninitialized tensor(s)"};
-
-            auto broadcast_check = tensor<T>::broadcast_order(a, b);
-            if (!broadcast_check.has_value())
-                throw std::invalid_argument("tensor::div: shape not suitable for elementwise division"); 
-        
-            tensor<T>::sync_device(a, b);
-            tensor<T> result(as_shape, broadcast_check.value().first->shape);
-
-            dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
-
-            device::kernel::div<<<grid_size, block_size>>>(
-                a.device.d_var(), 
-                b.device.d_var(), 
-                result.device.d_var()
-            );
-
-            device::runtime::find_error(__func__);
-            result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
-
-            return result;
+            return tensor<T>::elementwise_out<device::kernel::div<T>>("div", a, b);
         }
 
         tensor<T>& matmul(const tensor<T>& t) {

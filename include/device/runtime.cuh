@@ -31,7 +31,7 @@ namespace device {
 
             public:
                 explicit device_exception(constants::error code, const std::string_view& name): code_{code} {
-                    this->message_ = std::string{name} + ": " + std::string{make_string(code)};
+                    this->message_ = std::string{name} + std::string{make_string(code)};
                 }
 
                 const char *what(void) const noexcept override { return this->message_.data(); }
