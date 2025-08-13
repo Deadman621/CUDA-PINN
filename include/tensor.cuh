@@ -12,7 +12,7 @@
 #include<device/interface.cuh>
 
 template<typename First, typename... Rest>
-static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __ax; }
+static auto &GetFirst(const First &ax, const Rest &...bx) { return ax; }
 
 template<arithmetic T>
 class tensor: public init_tensor<T> {
@@ -165,17 +165,8 @@ class tensor: public init_tensor<T> {
         inline tensor<T>& operator++(void) { return this->add(tensor<T>(1)); }
         inline tensor<T>& operator--(void) { return this->sub(tensor<T>(1)); }
 
-        inline tensor<T> operator++(int) noexcept { 
-            tensor<T> temp = *this;
-            this->add(tensor<T>(1));
-            return temp;
-        }
-
-        inline tensor<T> operator--(int) noexcept {
-            tensor<T> temp = *this;
-            this->sub(tensor<T>(1));
-            return temp;            
-        }
+        inline tensor<T> operator++(int) = delete;
+        inline tensor<T> operator--(int) = delete;
         
         using const_ptr = const tensor<T>*;
         using op_tensor = std::optional<std::pair<const_ptr, const_ptr>>;
@@ -589,7 +580,7 @@ class tensor: public init_tensor<T> {
             if constexpr (count == 0)
                 throw std::invalid_argument("tensor::add: need at least one tensor");
 
-            const tensor<T> &first = GetFirstTensor(tensors...);
+            const tensor<T> &first = GetFirst(tensors...);
             const shape_t &tensor_shape = first.shape;
             const auto tensor_size = static_cast<s_size_t>(first.n);
 

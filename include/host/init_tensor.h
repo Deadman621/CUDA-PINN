@@ -90,14 +90,12 @@ class init_tensor {
     public:
         init_tensor(void): shape(0), stride(0) {}
 
-        explicit init_tensor(const init_tensor_0D& scalar): n{1}, data(std::make_unique<T[]>(1)) {
-            this->shape.resize(0);
-            this->stride.resize(0);
+        explicit init_tensor(const init_tensor_0D& scalar) noexcept
+        :n{1}, data(std::make_unique<T[]>(1)), shape(0), stride(0) {
             this->data[0] = scalar;
         }
 
-        init_tensor(as_shape_t, const shape_t& shape): shape{shape} {
-            this->n = 1;
+        init_tensor(as_shape_t, const shape_t& shape): shape{shape}, n{1} {
             for(auto const& i: this->shape) 
                 this->n *= i;         
 
