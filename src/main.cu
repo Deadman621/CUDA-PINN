@@ -1,6 +1,6 @@
-#include<host/runtime.h>
 #include<iostream>
 #include<tensor.cuh>
+#include<device/runtime.cuh>
 
 using std::cout;
 using std::endl;
@@ -11,13 +11,9 @@ int main(void) {
 
     const tensor_d a = {1, 2, 3 ,4}, b = {0, 6, 7, 8};
     
-    try {
-        const auto result = tensor_d::div(a, b);
-        cout << "result = " << result << endl;
-    } catch (host_runtime::device_exception& e) {
-        cout << e.what() << endl;
-    }
+    const auto result = tensor_d::div(a, b);
+    cout << "result = " << result << endl;
 
     cout << endl;
     return 0;
-} 
+}           

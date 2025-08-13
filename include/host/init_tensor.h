@@ -35,7 +35,7 @@ static std::string vec_to_str(const std::vector<T>& v) {
     return oss.str();
 }
 
-using device_constants::arithmetic;
+using device::constants::arithmetic;
 
 template<arithmetic T>
 class init_tensor {

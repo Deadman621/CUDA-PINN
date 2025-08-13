@@ -6,15 +6,10 @@
 #include<cstddef>
 #include<optional>
 #include<unordered_set>
-#include<host/runtime.h>
 #include<device/kernel.cuh>
+#include<device/runtime.cuh>
 #include<host/init_tensor.h>
-
-/* using std::cout; 
-using std::endl;  */
-
-using device_constants::BLOCK_SIZE;
-//using device_constants::OFFSET_TO_GPU;
+#include<device/interface.cuh>
 
 template<typename First, typename... Rest>
 static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __ax; }
@@ -22,7 +17,7 @@ static auto &GetFirstTensor(const First &__ax, const Rest &...__bx) { return __a
 template<arithmetic T>
 class tensor: public init_tensor<T> {
     private:
-        mutable kernel::device<T> device;
+        mutable device::tensor::interface<T> device;
         mutable bool host_dirty = false;
         bool transposed = false;
 
@@ -258,15 +253,15 @@ class tensor: public init_tensor<T> {
             if (!broadcast_check.has_value())
                 throw std::invalid_argument{"tensor::add: incompaitable shape or size"};
         
-            else if (broadcast_check.value().first != this) \
+            else if (broadcast_check.value().first != this) 
                 throw std::invalid_argument{"tensor::add: cannot broadcast this (object)"};
         
             tensor<T>::sync_device(*this, t);
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
-            kernel::add<<<grid_size, block_size>>>(
+            device::kernel::add<<<grid_size, block_size>>>(
                 this->device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var()
@@ -288,10 +283,10 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(a, b);
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
-            kernel::add<<<grid_size, block_size>>>(
+            device::kernel::add<<<grid_size, block_size>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var()
@@ -316,10 +311,10 @@ class tensor: public init_tensor<T> {
         
             tensor<T>::sync_device(*this, t);
             
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
-            kernel::sub<<<grid_size, block_size>>>(
+            device::kernel::sub<<<grid_size, block_size>>>(
                 this->device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var()
@@ -341,10 +336,10 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(a, b);
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
             
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
-            kernel::sub<<<grid_size, block_size>>>(
+            device::kernel::sub<<<grid_size, block_size>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var()
@@ -369,10 +364,10 @@ class tensor: public init_tensor<T> {
         
             tensor<T>::sync_device(*this, t);
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
 
-            kernel::mul<<<grid_size, block_size>>>(
+            device::kernel::mul<<<grid_size, block_size>>>(
                 this->device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var()
@@ -394,10 +389,10 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(a, b);
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((result.n * block_size.x - 1) / block_size.x);
 
-            kernel::mul<<<grid_size, block_size>>>(
+            device::kernel::mul<<<grid_size, block_size>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var()
@@ -422,16 +417,16 @@ class tensor: public init_tensor<T> {
         
             tensor<T>::sync_device(*this, t);
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
 
-            kernel::div<<<grid_size, block_size>>>(
+            device::kernel::div<<<grid_size, block_size>>>(
                 this->device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var()
             );
 
-            host_runtime::find_error(__PRETTY_FUNCTION__);
+            device::runtime::find_error(__PRETTY_FUNCTION__);
             this->device.copy_to(this->data.get(), cudaMemcpyDeviceToHost);
 
             return *this;   
@@ -448,16 +443,16 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(a, b);
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((result.n * block_size.x - 1) / block_size.x);
 
-            kernel::div<<<grid_size, block_size>>>(
+            device::kernel::div<<<grid_size, block_size>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var()
             );
 
-            host_runtime::find_error(__func__);
+            device::runtime::find_error(__func__);
             result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
 
             return result;
@@ -484,7 +479,7 @@ class tensor: public init_tensor<T> {
                 (j + block_size.y - 1) / block_size.y
             );
 
-            kernel::matmul<<<grid_size, block_size>>>(
+            device::kernel::matmul<<<grid_size, block_size>>>(
                 temp.device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var(), 
@@ -515,7 +510,7 @@ class tensor: public init_tensor<T> {
                 (j + block.y - 1) / block.y
             );
 
-            kernel::matmul<<<grid_size, block>>>(
+            device::kernel::matmul<<<grid_size, block>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var(), 
@@ -541,10 +536,10 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(temp, t);
             this->resize({});
 
-            dim3 block_size(BLOCK_SIZE);
+            dim3 block_size(device::constants::BLOCK_SIZE);
             dim3 grid_size((temp.n + block_size.x - 1) / block_size.x);
 
-            kernel::dot<<<grid_size, block_size>>>(
+            device::kernel::dot<<<grid_size, block_size>>>(
                 temp.device.d_var(), 
                 t.device.d_var(), 
                 this->device.d_var()
@@ -569,10 +564,10 @@ class tensor: public init_tensor<T> {
             tensor<T> result(0);
             size_t N = a.n;
 
-            dim3 block(BLOCK_SIZE);
+            dim3 block(device::constants::BLOCK_SIZE);
             dim3 grid_size((N + block.x - 1) / block.x);
             
-            kernel::dot<<<grid_size, block>>>(
+            device::kernel::dot<<<grid_size, block>>>(
                 a.device.d_var(), 
                 b.device.d_var(), 
                 result.device.d_var()
@@ -604,21 +599,21 @@ class tensor: public init_tensor<T> {
             if (!((tensors == first) && ...))
                 throw std::invalid_argument("tensor::add: incompaitable shape or size");
 
-            tensor<T>::sync_device(tensors...);
+            tensor<T>::sync_device(tensors...);  
             tensor<T> result(as_shape, tensor_shape);
                 
-            std::vector<kernel::d_variables<T>> devices = {tensors.device.d_var()...};
+            std::vector<device::tensor::variables<T>> devices = {tensors.device.d_var()...};
 
-            kernel::d_variables<T> *d_ptr;
-            size_t mem_size = sizeof(kernel::d_variables<T>) * devices.size();
+            device::tensor::variables<T> *d_ptr;
+            size_t mem_size = sizeof(device::tensor::variables<T>) * devices.size();
 
             cudaMalloc(&d_ptr, mem_size);
             cudaMemcpy(d_ptr, devices.data(), mem_size, cudaMemcpyHostToDevice);
             
-            int block_size(BLOCK_SIZE);
+            int block_size(device::constants::BLOCK_SIZE);
             int grid_size = (tensor_size + block_size - 1) / block_size;
             
-            kernel::add_multiple<T><<<grid_size, block_size>>>(d_ptr, result.device, count);
+            device::kernel::add_multiple<T><<<grid_size, block_size>>>(d_ptr, result.device, count);
             cudaFree(d_ptr);
             
             result.device.copy_to(result.data.get(), cudaMemcpyDeviceToHost);
@@ -631,7 +626,7 @@ class tensor: public init_tensor<T> {
             size_t size = order.size();
             shape_t& shape = result.shape;
             shape_t& stride = result.stride;
-            kernel::device<T>& device = result.device;
+            device::tensor::interface<T>& device = result.device;
 
             if (size == 0) {
                 s_size_t start = 0, end = static_cast<s_size_t>(shape.size()) - 1;
