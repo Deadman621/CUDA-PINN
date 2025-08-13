@@ -365,7 +365,7 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(*this, t);
 
             dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
+            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
             device::kernel::mul<<<grid_size, block_size>>>(
                 this->device.d_var(), 
@@ -390,7 +390,7 @@ class tensor: public init_tensor<T> {
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
 
             dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n * block_size.x - 1) / block_size.x);
+            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
             device::kernel::mul<<<grid_size, block_size>>>(
                 a.device.d_var(), 
@@ -418,7 +418,7 @@ class tensor: public init_tensor<T> {
             tensor<T>::sync_device(*this, t);
 
             dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((this->n * block_size.x - 1) / block_size.x);
+            dim3 grid_size((this->n + block_size.x - 1) / block_size.x);
 
             device::kernel::div<<<grid_size, block_size>>>(
                 this->device.d_var(), 
@@ -444,7 +444,7 @@ class tensor: public init_tensor<T> {
             tensor<T> result(as_shape, broadcast_check.value().first->shape);
 
             dim3 block_size(device::constants::BLOCK_SIZE);
-            dim3 grid_size((result.n * block_size.x - 1) / block_size.x);
+            dim3 grid_size((result.n + block_size.x - 1) / block_size.x);
 
             device::kernel::div<<<grid_size, block_size>>>(
                 a.device.d_var(), 
@@ -611,7 +611,7 @@ class tensor: public init_tensor<T> {
             cudaMemcpy(d_ptr, devices.data(), mem_size, cudaMemcpyHostToDevice);
             
             int block_size(device::constants::BLOCK_SIZE);
-            int grid_size = (tensor_size + block_size - 1) / block_size;
+            int grid_size((tensor_size + block_size - 1) / block_size);
             
             device::kernel::add_multiple<T><<<grid_size, block_size>>>(d_ptr, result.device, count);
             cudaFree(d_ptr);
